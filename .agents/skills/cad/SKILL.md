@@ -25,7 +25,7 @@ For ref grammar, selector semantics, stale-ref handling, and geometry-fact workf
 
 ## CAD Explorer Handoff
 
-After editing or regenerating any CAD Explorer-displayable `.step`, `.stp`, `.stl`, `.3mf`, `.dxf`, or `.urdf` entry, make CAD Explorer available and include links for the affected entries in the final response.
+After editing or regenerating any CAD Explorer-displayable `.step`, `.stp`, `.stl`, `.3mf`, or `.dxf` entry, make CAD Explorer available and include links for the affected entries in the final response.
 
 Ensure the CAD Explorer server first:
 

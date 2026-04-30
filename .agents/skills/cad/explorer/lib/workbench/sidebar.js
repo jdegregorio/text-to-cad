@@ -171,8 +171,7 @@ function entryLeafName(entry) {
 function normalizedEntryStem(entry) {
   return entryLeafName(entry)
     .replace(/\.step\.json$/i, "")
-    .replace(/\.urdf\.json$/i, "")
-    .replace(/\.(step|stp|stl|3mf|dxf|urdf|py)$/i, "");
+    .replace(/\.(step|stp|stl|3mf|dxf|py)$/i, "");
 }
 
 export function sidebarDirectoryIdForEntry(entry) {
@@ -196,9 +195,7 @@ export function filenameLabelForEntry(entry) {
   const sourceFormat = String(
     entry?.kind === "dxf"
       ? "dxf"
-      : entry?.kind === "urdf"
-        ? "urdf"
-        : entry?.kind === "stl"
+      : entry?.kind === "stl"
           ? "stl"
           : entry?.kind === "3mf"
             ? "3mf"
@@ -207,9 +204,6 @@ export function filenameLabelForEntry(entry) {
 
   if (sourceFormat === "dxf") {
     return `${stem}.dxf`;
-  }
-  if (sourceFormat === "urdf" || entry?.kind === "urdf") {
-    return `${stem}.urdf`;
   }
   if (sourceFormat === "stl" || entry?.kind === "stl") {
     return `${stem}.stl`;

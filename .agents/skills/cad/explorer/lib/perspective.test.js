@@ -27,32 +27,32 @@ test("resolvePerspectiveSnapshot uses the fallback only when the primary value i
 
 test("perspective snapshots only match the scene they were captured from", () => {
   const taggedSnapshot = annotatePerspectiveSnapshot(PERSPECTIVE_A, {
-    modelKey: "sample_robot.urdf",
-    sceneScaleMode: "urdf"
+    modelKey: "sample_part.step",
+    sceneScaleMode: "cad"
   });
 
   assert.deepEqual(taggedSnapshot, {
     ...PERSPECTIVE_A,
-    modelKey: "sample_robot.urdf",
-    sceneScaleMode: "urdf"
+    modelKey: "sample_part.step",
+    sceneScaleMode: "cad"
   });
   assert.equal(
     perspectiveSnapshotMatchesScene(taggedSnapshot, {
-      modelKey: "sample_robot.urdf",
-      sceneScaleMode: "urdf"
+      modelKey: "sample_part.step",
+      sceneScaleMode: "cad"
     }),
     true
   );
   assert.equal(
     perspectiveSnapshotMatchesScene(taggedSnapshot, {
-      modelKey: "sample_robot",
+      modelKey: "sample_assembly.step",
       sceneScaleMode: "cad"
     }),
     false
   );
   assert.equal(
     perspectiveSnapshotMatchesScene(PERSPECTIVE_A, {
-      modelKey: "sample_robot.urdf"
+      modelKey: "sample_part.step"
     }),
     false
   );

@@ -6,7 +6,7 @@ This folder contains the CAD Explorer web app. CAD Explorer is read-only with re
 
 ## Prompt Workflow
 
-- CAD Explorer discovers displayable entries by scanning `EXPLORER_ROOT_DIR`, defaulting to the Vite process's current working directory when unset or empty, then loads package-local render assets and generated URDF/authored DXF XML/text from that tree.
+- CAD Explorer discovers displayable entries by scanning `EXPLORER_ROOT_DIR`, defaulting to the Vite process's current working directory when unset or empty, then loads package-local render assets and authored DXF text from that tree.
 - Prompt-ready `@cad[...]` refs are expected output from the workspace. The full grammar lives in [CAD prompt references](../references/prompt-refs.md).
 - Common copied ref shapes include whole entries, occurrences, shape/face/edge/corner selectors, and grouped same-occurrence selectors, such as `@cad[<workspace-relative-cad-path>]`, `@cad[<workspace-relative-cad-path>#o1.2]`, `@cad[<workspace-relative-cad-path>#f12]`, and `@cad[<workspace-relative-cad-path>#o1.2.f12,f13,e7,v4]`.
 - The path inside `@cad[...]` is relative to the Vite process's current working directory and omits `.step` or `.stp`.
@@ -16,7 +16,7 @@ This folder contains the CAD Explorer web app. CAD Explorer is read-only with re
 
 ## Data Model
 
-- CAD Explorer discovers entries by scanning existing `.step`, `.stp`, `.stl`, `.3mf`, `.dxf`, and `.urdf` files. It does not inspect Python generators for discovery.
+- CAD Explorer discovers entries by scanning existing `.step`, `.stp`, `.stl`, `.3mf`, and `.dxf` files. It does not inspect Python generators for discovery.
 - STEP part entries load:
   - package-local `<cad-dir>/.../.<step-filename>/model.glb` for display
   - package-local `<cad-dir>/.../.<step-filename>/topology.json`
@@ -28,11 +28,6 @@ This folder contains the CAD Explorer web app. CAD Explorer is read-only with re
   - standalone or configured exported `<cad-dir>/.../*.stl` meshes directly
 - 3MF entries load:
   - standalone or configured exported `<cad-dir>/.../*.3mf` meshes directly
-- URDF entries load:
-  - generated `<cad-dir>/.../*.urdf` XML directly
-  - referenced URDF STL mesh filenames directly
-  - optional package-local `<cad-dir>/.../.<urdf-filename>/explorer.json` metadata for defaults and poses
-  - optional package-local `<cad-dir>/.../.<urdf-filename>/robot-motion/explorer.json` metadata for local motion server commands
 - The CAD Explorer UI is in `components/CadExplorer.js`.
 - The flat-pattern explorer UI is in `components/DxfExplorer.js`.
 - The workspace UI is in `components/CadWorkspace.js`.
@@ -59,9 +54,6 @@ Do not hand-edit package-local generated CAD assets during normal CAD or CAD Exp
 - `npm run dev` starts `vite dev`, scans `EXPLORER_ROOT_DIR` relative to the Vite process's current working directory, and updates the workspace when matching CAD files or per-STEP CAD Explorer assets are added, changed, or removed.
 - `EXPLORER_DEFAULT_FILE` can be set to a scan-root-relative file path, including extension, to open that entry by default when the URL has no `?file=`.
 - `EXPLORER_GITHUB_URL` sets the top-bar GitHub button target and defaults to `https://github.com/earthtojake/text-to-cad`.
-- URDF CAD Explorer defaults and poses load from `.<urdf>/explorer.json`. IK and path-planning controls load from optional `.<urdf>/robot-motion/explorer.json` and use a separately started local motion websocket server. Vite never starts Python or ROS.
-- The browser connects to `EXPLORER_ROBOT_MOTION_WS_URL` when set, otherwise `ws://127.0.0.1:8765/ws`; `?motionWs=` can override the websocket URL for a single browser session.
-- Start the motion server with `.agents/skills/robot-motion/scripts/run-motion-server.sh`. Plain URDF entries never contact the motion server.
 - `npm run build` scans `EXPLORER_ROOT_DIR`, defaulting to the Vite process's current working directory when unset or empty, and bakes that scan into the static app.
 - Production builds read `EXPLORER_DEFAULT_FILE`, `EXPLORER_GITHUB_URL`, `EXPLORER_ROOT_DIR`, and `EXPLORER_WORKSPACE_ROOT` at build time. If the build command runs from `.agents/skills/cad/explorer`, CAD Explorer falls back to the containing workspace root; set `EXPLORER_WORKSPACE_ROOT=/path/to/workspace` explicitly when your deployment builds from a different directory layout.
 - `npm run build:app` runs an isolated verification build for CAD Explorer-only changes.
@@ -70,15 +62,14 @@ Do not hand-edit package-local generated CAD assets during normal CAD or CAD Exp
 ## Hot Reload
 
 - Real-time dev updates come from the Vite CAD catalog endpoint and websocket events, not browser polling.
-- When external tools add, remove, or update `.step`, `.stp`, `.stl`, `.3mf`, `.dxf`, `.urdf`, `.<step-filename>/*.glb`, `.<step-filename>/topology.json`, `.<step-filename>/topology.bin`, or URDF CAD Explorer metadata files under an active scan directory, Vite asks the client to rescan and remount the workspace.
+- When external tools add, remove, or update `.step`, `.stp`, `.stl`, `.3mf`, `.dxf`, `.<step-filename>/*.glb`, `.<step-filename>/topology.json`, or `.<step-filename>/topology.bin` files under an active scan directory, Vite asks the client to rescan and remount the workspace.
 
 ## UX Contract
 
 - STEP part and assembly entries expose face/edge/corner picking from selector proxy geometry.
 - Shape and occurrence refs are exposed through inspector state, not a separate canvas pick mode.
 - DXF entries are read-only flat-pattern views.
-- URDF entries are read-only robot views with joint sliders; entries with robot-motion metadata and a live local motion server may expose pose solving or path-planning controls. They do not expose picking, refs, or drawing tools.
-- File pickers use canonical suffix labels: STEP parts and assemblies show `.step`, STL entries show `.stl`, 3MF entries show `.3mf`, URDF entries show `.urdf`, and DXF entries show `.dxf`.
+- File pickers use canonical suffix labels: STEP parts and assemblies show `.step`, STL entries show `.stl`, 3MF entries show `.3mf`, and DXF entries show `.dxf`.
 - The workspace selects one file at a time. Per-file view, reference, drawing, and tool state is still restored from the existing session `tabs` state when a file is selected again.
 - Sidebar grouping follows the exact directory structure under the active scan directory, not hardcoded part/assembly roots.
 
@@ -87,8 +78,8 @@ Do not hand-edit package-local generated CAD assets during normal CAD or CAD Exp
 - For pure CAD Explorer changes, run `cd .agents/skills/cad/explorer && npm run build:app`.
 - Run `cd .agents/skills/cad/explorer && npm run test:node` when the change touches explorer logic, parsing, persistence, catalog scanning, selectors, or kinematics.
 - Run `npm --prefix .agents/skills/cad/explorer exec vite -- build --config .agents/skills/cad/explorer/vite.config.mjs` from the workspace you want to scan when you need the normal production `dist/` output for the current generated CAD snapshot.
-- If the change depends on fresh CAD-derived assets, regenerate the affected entries separately with `.agents/skills/cad/scripts/gen_step_part/cli.py`, `.agents/skills/cad/scripts/gen_step_assembly/cli.py`, `.agents/skills/cad/scripts/gen_dxf/cli.py`, or `.agents/skills/urdf/scripts/gen_urdf/cli.py` before explorer verification.
-- For render-contract changes, inspect the relevant package-local `.<step-filename>/model.glb`, `.<step-filename>/topology.json`, `.<step-filename>/topology.bin`, native assembly `.<step-filename>/components/*.glb` meshes, visible `.stl`, visible `.3mf`, visible `.dxf`, or visible `.urdf` files.
+- If the change depends on fresh CAD-derived assets, regenerate the affected entries separately with `.agents/skills/cad/scripts/gen_step_part/cli.py`, `.agents/skills/cad/scripts/gen_step_assembly/cli.py`, or `.agents/skills/cad/scripts/gen_dxf/cli.py` before explorer verification.
+- For render-contract changes, inspect the relevant package-local `.<step-filename>/model.glb`, `.<step-filename>/topology.json`, `.<step-filename>/topology.bin`, native assembly `.<step-filename>/components/*.glb` meshes, visible `.stl`, visible `.3mf`, or visible `.dxf` files.
 
 ## Run
 

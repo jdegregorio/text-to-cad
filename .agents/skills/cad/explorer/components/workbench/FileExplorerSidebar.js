@@ -1,5 +1,4 @@
 import {
-  Bot,
   Boxes,
   ChevronRight,
   DraftingCompass,
@@ -46,9 +45,6 @@ function iconForEntry(entry, sourceFormat, pending) {
   if (sourceFormat === RENDER_FORMAT.DXF) {
     return DraftingCompass;
   }
-  if (entry?.kind === "urdf") {
-    return Bot;
-  }
   return Package;
 }
 
@@ -60,7 +56,6 @@ function FileEntryButton({
   entrySourceFormat,
   entryHasMesh,
   entryHasDxf,
-  entryHasUrdf,
   nested = false
 }) {
   const { isMobile, setOpenMobile } = useSidebar();
@@ -70,9 +65,7 @@ function FileEntryButton({
   const sourceFormat = entrySourceFormat(entry);
   const pending = sourceFormat === RENDER_FORMAT.DXF
     ? !entryHasDxf(entry)
-    : sourceFormat === RENDER_FORMAT.URDF
-      ? !entryHasUrdf(entry)
-      : !entryHasMesh(entry);
+    : !entryHasMesh(entry);
   const EntryIcon = iconForEntry(entry, sourceFormat, pending);
   const title = [
     label,
@@ -115,7 +108,6 @@ function DirectoryNode({
   entrySourceFormat,
   entryHasMesh,
   entryHasDxf,
-  entryHasUrdf,
   nested = false
 }) {
   const expanded = queryActive || expandedDirectoryIds.has(directory.id);
@@ -170,7 +162,6 @@ function DirectoryNode({
                     entrySourceFormat={entrySourceFormat}
                     entryHasMesh={entryHasMesh}
                     entryHasDxf={entryHasDxf}
-                    entryHasUrdf={entryHasUrdf}
                     nested={true}
                   />
                 );
@@ -185,7 +176,6 @@ function DirectoryNode({
                     entrySourceFormat={entrySourceFormat}
                     entryHasMesh={entryHasMesh}
                     entryHasDxf={entryHasDxf}
-                    entryHasUrdf={entryHasUrdf}
                     nested={true}
                   />
                 </SidebarMenuSubItem>
@@ -234,7 +224,6 @@ export default function FileExplorerSidebar({
   entrySourceFormat,
   entryHasMesh,
   entryHasDxf,
-  entryHasUrdf,
   onStartResize
 }) {
   if (previewMode) {
@@ -289,7 +278,6 @@ export default function FileExplorerSidebar({
                           entrySourceFormat={entrySourceFormat}
                           entryHasMesh={entryHasMesh}
                           entryHasDxf={entryHasDxf}
-                          entryHasUrdf={entryHasUrdf}
                         />
                       );
                     }
@@ -303,7 +291,6 @@ export default function FileExplorerSidebar({
                           entrySourceFormat={entrySourceFormat}
                           entryHasMesh={entryHasMesh}
                           entryHasDxf={entryHasDxf}
-                          entryHasUrdf={entryHasUrdf}
                         />
                       </SidebarMenuItem>
                     );

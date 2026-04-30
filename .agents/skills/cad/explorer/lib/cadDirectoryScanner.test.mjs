@@ -36,25 +36,6 @@ test("scanCadDirectory discovers CAD files directly and infers STEP assets", () 
   writeFile(path.join(repoRoot, "workspace/sample_part/sample_part.stl"), "solid sample_part\nendsolid sample_part\n");
   writeFile(path.join(repoRoot, "workspace/sample_part/sample_part.3mf"), "3mf\n");
   writeFile(path.join(repoRoot, "workspace/sheets/bracket.dxf"), "0\nEOF\n");
-  writeFile(path.join(repoRoot, "workspace/robots/sample_robot.urdf"), "<robot name=\"sample_robot\" />\n");
-  writeFile(path.join(repoRoot, "workspace/robots/.sample_robot.urdf/explorer.json"), JSON.stringify({
-    schemaVersion: 3,
-    kind: "texttocad-urdf-explorer",
-    poses: []
-  }));
-  writeFile(path.join(repoRoot, "workspace/robots/.sample_robot.urdf/robot-motion/explorer.json"), JSON.stringify({
-    schemaVersion: 1,
-    kind: "texttocad-robot-motion-explorer",
-    motionServer: {
-      version: 1,
-      commands: {
-        "urdf.solvePose": {
-          endEffectors: []
-        }
-      }
-    }
-  }));
-  writeFile(path.join(repoRoot, "workspace/robots/.sample_robot.urdf/ignored.urdf"), "<robot name=\"ignored\" />\n");
   writeFile(path.join(repoRoot, "workspace/sample_part/sample_part.py"), "print('ignored')\n");
   writeFile(path.join(repoRoot, "workspace/.hidden/hidden.step"), "ISO-10303-21;\nEND-ISO-10303-21;\n");
 
@@ -68,12 +49,8 @@ test("scanCadDirectory discovers CAD files directly and infers STEP assets", () 
   assert.equal(entryByFile(catalog, "sample_part/sample_part.stl").kind, "stl");
   assert.equal(entryByFile(catalog, "sample_part/sample_part.3mf").kind, "3mf");
   assert.equal(entryByFile(catalog, "sheets/bracket.dxf").kind, "dxf");
-  assert.equal(entryByFile(catalog, "robots/sample_robot.urdf").kind, "urdf");
-  assert.ok(entryByFile(catalog, "robots/sample_robot.urdf").assets.explorerMetadata.url.startsWith("/workspace/robots/.sample_robot.urdf/explorer.json?v="));
-  assert.ok(entryByFile(catalog, "robots/sample_robot.urdf").assets.motionExplorerMetadata.url.startsWith("/workspace/robots/.sample_robot.urdf/robot-motion/explorer.json?v="));
   assert.equal(entryByFile(catalog, "sample_part/sample_part.py"), undefined);
   assert.equal(entryByFile(catalog, "sample_part/.sample_part.step/ignored.step"), undefined);
-  assert.equal(entryByFile(catalog, "robots/.sample_robot.urdf/ignored.urdf"), undefined);
   assert.equal(entryByFile(catalog, ".hidden/hidden.step"), undefined);
 });
 
@@ -104,14 +81,6 @@ test("normalizeExplorerRootDir rejects traversal", () => {
   assert.equal(normalizeExplorerRootDir(""), "");
   assert.equal(normalizeExplorerRootDir("workspace/samples"), "workspace/samples");
   assert.throws(() => normalizeExplorerRootDir("../workspace"), /inside the workspace/);
-});
-
-test("isServedCadAsset allows only explorer.json inside URDF sidecar directories", () => {
-  assert.equal(isServedCadAsset(path.join("workspace", ".sample_robot.urdf", "explorer.json")), true);
-  assert.equal(isServedCadAsset(path.join("workspace", ".sample_robot.urdf", "robot-motion", "explorer.json")), true);
-  assert.equal(isServedCadAsset(path.join("workspace", ".sample_robot.urdf", "robot-motion", "motion_server.json")), false);
-  assert.equal(isServedCadAsset(path.join("workspace", ".sample_robot.urdf", "ignored.urdf")), false);
-  assert.equal(isServedCadAsset(path.join("workspace", ".sample_robot.urdf", "other.json")), false);
 });
 
 test("isServedCadAsset serves standalone 3MF entries", () => {

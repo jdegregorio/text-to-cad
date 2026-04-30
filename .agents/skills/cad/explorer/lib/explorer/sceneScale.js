@@ -1,6 +1,5 @@
 export const EXPLORER_SCENE_SCALE = Object.freeze({
-  CAD: "cad",
-  URDF: "urdf"
+  CAD: "cad"
 });
 
 const SCENE_SCALE_SETTINGS = Object.freeze({
@@ -8,18 +7,11 @@ const SCENE_SCALE_SETTINGS = Object.freeze({
     minModelRadius: 1,
     minGridSize: 280,
     lightingScopeRadius: 140
-  }),
-  [EXPLORER_SCENE_SCALE.URDF]: Object.freeze({
-    minModelRadius: 0.05,
-    minGridSize: 0.5,
-    lightingScopeRadius: 0.25
   })
 });
 
 export function normalizeSceneScaleMode(value) {
-  return value === EXPLORER_SCENE_SCALE.URDF
-    ? EXPLORER_SCENE_SCALE.URDF
-    : EXPLORER_SCENE_SCALE.CAD;
+  return EXPLORER_SCENE_SCALE.CAD;
 }
 
 export function getSceneScaleSettings(value) {
