@@ -1,0 +1,17 @@
+[project]
+name = "text-to-cad"
+version = "0.1.0"
+description = "A script-driven CAD generation harness for coding agents."
+requires-python = ">=3.11"
+dependencies = [
+  "build123d",
+  "ezdxf",
+  "lxml",
+  "networkx",
+  "numpy",
+  "trimesh",
+  "vtk",
+]
+
+[tool.uv]
+package = false

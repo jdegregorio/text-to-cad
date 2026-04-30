@@ -32,20 +32,22 @@ launched from and omits the `.step` or `.stp` suffix.
 
 ## Python Environment
 
-Prefer the repo-local CAD runtime when it exists:
+Prefer the repo-local CAD runtime managed by `uv`. From the repo root, install
+or refresh Python dependencies with:
 
 ```bash
-./.venv/bin/python
+uv sync
 ```
 
-This environment has the CAD dependencies required by the skill tools, including
-`build123d` and `OCP`. If `.venv` is missing or cannot import those modules,
-create/install it from the repo root before running CAD tools:
+Run CAD tooling through `uv` where possible:
 
 ```bash
-python3.11 -m venv .venv
-./.venv/bin/pip install -r .agents/skills/cad/requirements.txt
+uv run python
 ```
+
+The synchronized `.venv` has the CAD dependencies required by the skill tools,
+including `build123d` and `OCP`. Direct `./.venv/bin/python` usage is acceptable
+when a tool specifically needs the interpreter path.
 
 Other bundled skills own their Python dependencies in their skill directories; install them only when using those workflows.
 
