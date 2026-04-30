@@ -17,6 +17,8 @@ An open source harness for generating 3D models with your favorite coding agent
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](.agents/skills/cad/requirements.txt)
 [![uv](https://img.shields.io/badge/uv-Package%20Manager-DE5FE9?style=for-the-badge)](pyproject.toml)
 [![build123d](https://img.shields.io/badge/build123d-CAD-00A676?style=for-the-badge)](https://github.com/gumyr/build123d)
+[![bd_warehouse](https://img.shields.io/badge/bd__warehouse-Parts-00A676?style=for-the-badge)](https://bd-warehouse.readthedocs.io/en/latest/)
+[![py_gearworks](https://img.shields.io/badge/py__gearworks-Gears-00A676?style=for-the-badge)](https://github.com/GarryBGoode/py_gearworks)
 [![OCP](https://img.shields.io/badge/OCP-OpenCascade-2F80ED?style=for-the-badge)](.agents/skills/cad/requirements.txt)
 [![STEP](https://img.shields.io/badge/STEP-Export-4A5568?style=for-the-badge)](.agents/skills/cad/SKILL.md)
 [![STL](https://img.shields.io/badge/STL-Export-4A5568?style=for-the-badge)](.agents/skills/cad/SKILL.md)
@@ -36,6 +38,7 @@ An open source harness for generating 3D models with your favorite coding agent
 - **Review** - Render quick snapshots for fast checks during an iteration loop.
 - **Reproduce** - Edit source files first, then regenerate explicit targets.
 - **Local** - Run the harness and CAD Explorer locally with no backend to host.
+- **Libraries** - Use `bd_warehouse` standard parts and `py_gearworks` gear generators from the repo-local CAD runtime.
 
 ## 🧰 Bundled Skills
 
@@ -88,10 +91,32 @@ Install Python CAD dependencies with `uv`:
 uv sync
 ```
 
-This creates the repo-local `.venv` used by the CAD skill tools. If you are
-working in a standalone copy of the CAD skill without this harness
-`pyproject.toml`, use `uv venv --python 3.11 .venv` followed by
-`uv pip install -r .agents/skills/cad/requirements.txt`.
+This creates the repo-local `.venv` used by the CAD skill tools and installs
+the CAD toolbox dependencies, including `build123d`, `bd_warehouse`, and
+`py_gearworks`. If you are working in a standalone copy of the CAD skill
+without this harness `pyproject.toml`, use `uv venv --python 3.11 .venv`
+followed by `uv pip install -r .agents/skills/cad/requirements.txt`; install
+project-specific part libraries separately in that environment.
+
+## 🧩 CAD Toolbox Libraries
+
+The harness includes two external build123d-compatible libraries for common
+mechanical CAD workflows:
+
+- **`bd_warehouse`** - Use for standard and configurable parts such as screws,
+  nuts, washers, clearance/tap/insert holes, bearings, flanges, pipes,
+  sprockets, OpenBuilds parts, and modeled threads. Prefer it when the design
+  asks for catalog-like hardware, fit checks, threaded fastener features, or
+  reusable standard components.
+- **`py_gearworks`** - Use for gear design when tooth geometry, meshing,
+  backlash-aware placement, ring gears, bevel/helical/cycloid gears, or gear
+  pair alignment matter. Add bores, hubs, keys, shafts, housings, and mounting
+  details with normal `build123d` operations around the generated gear bodies.
+
+Generators should still return the normal CAD skill `gen_step()` envelope and
+explicit output paths. Treat these libraries as source-level helpers: import
+them in the owning Python generator, regenerate the explicit STEP/STL/3MF/DXF
+targets, then inspect the generated outputs in CAD Explorer.
 
 Install CAD Explorer dependencies:
 

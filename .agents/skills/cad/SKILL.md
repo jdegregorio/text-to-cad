@@ -10,12 +10,13 @@ description: CAD workflows to programatically generate STEP/STL/3MF/DXF/GLB file
 1. Read project-local documentation only when project inventory, dependency notes, or preferred rebuild roots matter.
 2. Treat generator scripts and imported STEP files as source of truth. Do not hand-edit generated STEP, STL, 3MF, GLB, topology, DXF render payloads, or explorer-derived artifacts. Do not use git to track or compare changes between exported files; review source changes, deterministic summaries, snapshots, or CAD Explorer output instead.
 3. For generator and imported STEP/STP contracts, read `references/generator-contract.md`.
-4. If the prompt includes `@cad[...]` refs, read `references/prompt-refs.md` and resolve refs before editing with `cadref`; use `--detail --facts` for face, edge, corner, or occurrence-specific edits.
-5. For nontrivial geometry edits, read `references/geometry-workflow.md` and write a short geometry contract before editing.
-6. Edit only the owning generator or imported STEP source needed for the requested change.
-7. Regenerate explicit targets only. Do not run directory-wide generation.
-8. Validate with the cheapest proof that is strong enough. For validation and review images, read `references/validation-and-snapshots.md`.
-9. For displayable outputs, follow CAD Explorer Handoff unless browser handoff is explicitly unnecessary.
+4. For designs that ask for standard hardware, bearings, pipes/flanges, threads, sprockets, OpenBuilds parts, or gears, read `references/external-part-libraries.md` before writing custom geometry.
+5. If the prompt includes `@cad[...]` refs, read `references/prompt-refs.md` and resolve refs before editing with `cadref`; use `--detail --facts` for face, edge, corner, or occurrence-specific edits.
+6. For nontrivial geometry edits, read `references/geometry-workflow.md` and write a short geometry contract before editing.
+7. Edit only the owning generator or imported STEP source needed for the requested change.
+8. Regenerate explicit targets only. Do not run directory-wide generation.
+9. Validate with the cheapest proof that is strong enough. For validation and review images, read `references/validation-and-snapshots.md`.
+10. For displayable outputs, follow CAD Explorer Handoff unless browser handoff is explicitly unnecessary.
 
 ## Prompt Artifacts
 
@@ -67,6 +68,7 @@ The command interfaces are target-explicit. The STEP tools accept generated Pyth
 - Generator and imported STEP/STP contracts: `references/generator-contract.md`
 - Geometry edit workflow: `references/geometry-workflow.md`
 - Prompt references: `references/prompt-refs.md`
+- External part libraries: `references/external-part-libraries.md`
 - Validation and snapshots: `references/validation-and-snapshots.md`
 - `@cad[...]` inspection: `references/cadref.md`
 - Snapshot rendering: `references/snapshot.md`
