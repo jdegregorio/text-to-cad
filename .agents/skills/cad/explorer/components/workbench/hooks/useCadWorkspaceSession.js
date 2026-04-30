@@ -72,7 +72,6 @@ export function useCadWorkspaceSession({
   setMobileLookMenuOpen,
   setSidebarWidth,
   setTabToolsWidth,
-  setUrdfEntryAnimationEnabled,
   setOpenTabs,
   applyTabRecord,
   selectedEntryKeyFromUrl,
@@ -140,7 +139,6 @@ export function useCadWorkspaceSession({
       setMobileLookMenuOpen(restoredSession.mobileLookSheetOpen);
       setSidebarWidth(restoredSidebarWidth);
       setTabToolsWidth(restoredSession.tabToolsWidth);
-      setUrdfEntryAnimationEnabled(restoredSession.urdfEntryAnimationEnabled);
 
       const urlActiveTab = urlSelectedKey
         ? (
@@ -194,7 +192,6 @@ export function useCadWorkspaceSession({
     setSidebarOpen,
     setSidebarWidth,
     setTabToolsWidth,
-    setUrdfEntryAnimationEnabled,
     upsertTabRecord,
     initialSelectedTabSnapshot,
     cadWorkspaceSessionBootstrappedRef,

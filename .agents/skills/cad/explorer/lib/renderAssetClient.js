@@ -19,7 +19,6 @@ const stlCache = new Map();
 const threeMfCache = new Map();
 const selectorCache = new Map();
 const dxfCache = new Map();
-const urdfCache = new Map();
 
 async function fetchJson(url, { signal } = {}) {
   const response = await fetch(url, { signal });
@@ -219,26 +218,4 @@ export async function loadRenderDxf(url, { signal } = {}) {
 
 export function peekRenderDxf(url) {
   return peekCached(dxfCache, url);
-}
-
-function urdfCacheKey(url, explorerMetadataUrl = "", motionExplorerMetadataUrl = "") {
-  return [url, explorerMetadataUrl, motionExplorerMetadataUrl].filter(Boolean).join("::");
-}
-
-export async function loadRenderUrdf(url, { signal, explorerMetadataUrl = "", motionExplorerMetadataUrl = "" } = {}) {
-  const cacheKey = urdfCacheKey(url, explorerMetadataUrl, motionExplorerMetadataUrl);
-  const payload = await loadCached(urdfCache, cacheKey, async () => {
-    const [xmlText, explorerMetadata, motionExplorerMetadata, { parseUrdf }] = await Promise.all([
-      loadRenderText(url, { signal }),
-      explorerMetadataUrl ? loadRenderJson(explorerMetadataUrl, { signal }) : null,
-      motionExplorerMetadataUrl ? loadRenderJson(motionExplorerMetadataUrl, { signal }) : null,
-      import("./urdf/parseUrdf.js"),
-    ]);
-    return parseUrdf(xmlText, { sourceUrl: url, explorerMetadata, motionExplorerMetadata });
-  }, { cachePending: !signal });
-  return finalizeCached(urdfCache, cacheKey, payload);
-}
-
-export function peekRenderUrdf(url, { explorerMetadataUrl = "", motionExplorerMetadataUrl = "" } = {}) {
-  return peekCached(urdfCache, urdfCacheKey(url, explorerMetadataUrl, motionExplorerMetadataUrl));
 }

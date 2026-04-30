@@ -35,7 +35,7 @@ function createMemoryStorage() {
   };
 }
 
-test("filenameLabelForEntry shows canonical step, stl, 3mf, dxf, and urdf suffixes", () => {
+test("filenameLabelForEntry shows canonical step, stl, 3mf, and dxf suffixes", () => {
   assert.equal(
     filenameLabelForEntry({
       file: "sample_mount.step",
@@ -62,16 +62,6 @@ test("filenameLabelForEntry shows canonical step, stl, 3mf, dxf, and urdf suffix
       step: { path: "imports/vendor/widget.stp" }
     }),
     "widget.stp"
-  );
-
-  assert.equal(
-    filenameLabelForEntry({
-      file: "sample_robot.urdf",
-      kind: "urdf",
-      source: { format: "urdf", path: "sample_robot.urdf" },
-      name: "sample_robot (URDF)"
-    }),
-    "sample_robot.urdf"
   );
 
   assert.equal(
@@ -133,15 +123,6 @@ test("sidebarDirectoryIdForEntry keeps exact CAD file folders", () => {
 
   assert.equal(
     sidebarDirectoryIdForEntry({
-      file: "sample_robot.urdf",
-      kind: "urdf",
-      source: { format: "urdf", path: "sample_robot.urdf" }
-    }),
-    ""
-  );
-
-  assert.equal(
-    sidebarDirectoryIdForEntry({
       file: "meshes/fixture.stl",
       kind: "stl",
       source: { format: "stl", path: "meshes/fixture.stl" }
@@ -195,7 +176,7 @@ test("buildSidebarDirectoryTree lists CAD files in their exact source directory"
   );
 });
 
-test("workspace global state persists expanded directories, sidebar state, and URDF entry animation preference", () => {
+test("workspace global state persists expanded directories and sidebar state", () => {
   const originalWindow = globalThis.window;
   globalThis.window = {
     localStorage: createMemoryStorage(),
@@ -215,8 +196,7 @@ test("workspace global state persists expanded directories, sidebar state, and U
       desktopLookSheetOpen: false,
       mobileLookSheetOpen: true,
       sidebarWidth: 312,
-      tabToolsWidth: 344,
-      urdfEntryAnimationEnabled: false
+      tabToolsWidth: 344
     });
 
     const restoredSession = readCadWorkspaceSessionState();
@@ -235,7 +215,6 @@ test("workspace global state persists expanded directories, sidebar state, and U
     assert.equal(restoredSession.mobileLookSheetOpen, true);
     assert.equal(restoredSession.sidebarWidth, 312);
     assert.equal(restoredSession.tabToolsWidth, 344);
-    assert.equal(restoredSession.urdfEntryAnimationEnabled, false);
   } finally {
     if (originalWindow === undefined) {
       delete globalThis.window;
@@ -328,7 +307,6 @@ test("workspace global state defaults desktop sheets open and mobile sheets clos
     assert.equal(restoredSession.desktopFileSheetOpen, true);
     assert.equal(restoredSession.mobileSidebarOpen, false);
     assert.equal(restoredSession.mobileFileSheetOpen, false);
-    assert.equal(restoredSession.urdfEntryAnimationEnabled, false);
   } finally {
     if (originalWindow === undefined) {
       delete globalThis.window;

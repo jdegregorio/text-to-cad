@@ -54,9 +54,6 @@ function fileSheetLabel(fileSheetKind) {
   if (fileSheetKind === "dxf") {
     return "DXF sheet";
   }
-  if (fileSheetKind === "urdf") {
-    return "URDF sheet";
-  }
   if (fileSheetKind === "stepAssembly") {
     return "assembly sheet";
   }

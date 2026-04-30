@@ -1,4 +1,3 @@
-import json
 import shutil
 import unittest
 from pathlib import Path
@@ -80,25 +79,11 @@ class CadGenerationTests(unittest.TestCase):
     ) -> Path:
         return self._write_step_at(self.temp_root, name, suffix=suffix)
 
-    def test_catalog_discovery_ignores_urdf_only_generators(self) -> None:
-        self._write_step("sample")
-        (self._isolated_roots.cad_root / "sample_urdf.py").write_text(
-            "def gen_urdf():\n"
-            "    return {'xml': '<robot name=\"sample\" />', 'urdf_output': 'sample.urdf'}\n",
-            encoding="utf-8",
-        )
-
-        sources = cad_catalog.iter_cad_sources()
-
-        self.assertIn(self._cad_ref("sample"), {source.cad_ref for source in sources})
-        self.assertNotIn("sample_urdf", {source.cad_ref for source in sources})
-
     def _generator_script(
         self,
         name: str,
         *,
         with_dxf: bool = False,
-        with_urdf: bool = False,
         dxf_before_step: bool = False,
         step_output: str | None = None,
         export_stl: bool | None = None,
@@ -106,8 +91,6 @@ class CadGenerationTests(unittest.TestCase):
         export_3mf: bool | None = None,
         three_mf_output: str | None = None,
         dxf_output: str | None = None,
-        urdf_output: str | None = None,
-        urdf_explorer_metadata: str | None = None,
         stl_tolerance: float | None = None,
         stl_angular_tolerance: float | None = None,
         three_mf_tolerance: float | None = None,
@@ -146,8 +129,6 @@ class CadGenerationTests(unittest.TestCase):
             fields.append(f"'skip_topology': {skip_topology!r}")
         if with_dxf and dxf_output is None:
             dxf_output = f"{name}.dxf"
-        if with_urdf and urdf_output is None:
-            urdf_output = f"{name}.urdf"
 
         prologue = [
             "from pathlib import Path",
@@ -185,26 +166,12 @@ class CadGenerationTests(unittest.TestCase):
             "    }",
             "",
         ]
-        urdf_block = [
-            "def gen_urdf():",
-            "    _record('gen_urdf')",
-            "    return {",
-            "        'xml': '<robot name=\"part\"><link name=\"base\" /></robot>',",
-            f"        'urdf_output': {urdf_output!r},",
-            "    }",
-            "",
-        ]
-        if urdf_explorer_metadata is not None:
-            urdf_block.insert(-2, f"        'explorer_metadata': {urdf_explorer_metadata},")
-
         blocks = [prologue]
         if with_dxf and dxf_before_step:
             blocks.append(dxf_block)
         blocks.append(step_block)
         if with_dxf and not dxf_before_step:
             blocks.append(dxf_block)
-        if with_urdf:
-            blocks.append(urdf_block)
 
         script_path = self.temp_root / f"{name}.py"
         script_path.write_text("\n".join(line for block in blocks for line in block), encoding="utf-8")
@@ -216,14 +183,12 @@ class CadGenerationTests(unittest.TestCase):
         *,
         instances: list[dict[str, object]],
         with_dxf: bool = False,
-        with_urdf: bool = False,
         step_output: str | None = None,
         export_stl: bool | None = None,
         stl_output: str | None = None,
         export_3mf: bool | None = None,
         three_mf_output: str | None = None,
         dxf_output: str | None = None,
-        urdf_output: str | None = None,
         stl_tolerance: float | None = None,
         stl_angular_tolerance: float | None = None,
         three_mf_tolerance: float | None = None,
@@ -262,8 +227,6 @@ class CadGenerationTests(unittest.TestCase):
             fields.append(f"'skip_topology': {skip_topology!r}")
         if with_dxf and dxf_output is None:
             dxf_output = f"{name}.dxf"
-        if with_urdf and urdf_output is None:
-            urdf_output = f"{name}.urdf"
 
         lines = [
             "from pathlib import Path",
@@ -294,18 +257,6 @@ class CadGenerationTests(unittest.TestCase):
                     "    return {",
                     "        'document': _FakeDxf(),",
                     f"        'dxf_output': {dxf_output!r},",
-                    "    }",
-                    "",
-                ]
-            )
-        if with_urdf:
-            lines.extend(
-                [
-                    "def gen_urdf():",
-                    "    _record('gen_urdf')",
-                    "    return {",
-                    "        'xml': '<robot name=\"sample\"><link name=\"base\" /></robot>',",
-                    f"        'urdf_output': {urdf_output!r},",
                     "    }",
                     "",
                 ]
@@ -571,14 +522,8 @@ class CadGenerationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not define gen_dxf\\(\\) envelope"):
             cad_generation.generate_dxf_targets([str(script_path)])
 
-    def test_urdf_generation_rejects_source_without_urdf(self) -> None:
-        script_path = self._generator_script("part")
-
-        with self.assertRaisesRegex(ValueError, "does not define gen_urdf\\(\\) envelope"):
-            cad_generation.generate_urdf_targets([str(script_path)])
-
     def test_step_generator_does_not_run_sidecars(self) -> None:
-        script_path = self._generator_script("flat", with_dxf=True, with_urdf=True, dxf_before_step=True)
+        script_path = self._generator_script("flat", with_dxf=True, dxf_before_step=True)
         spec = next(spec for spec in cad_generation.list_entry_specs() if spec.cad_ref == self._cad_ref("flat"))
 
         cad_generation.run_script_generator(spec, "gen_step")
@@ -586,53 +531,6 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual("gen_step\n", script_path.with_suffix(".calls").read_text(encoding="utf-8"))
         self.assertFalse(script_path.with_suffix(".dxf").exists())
         self.assertTrue(script_path.with_suffix(".step").exists())
-        self.assertFalse(script_path.with_suffix(".urdf").exists())
-
-    def test_gen_urdf_does_not_run_step_or_dxf_sidecars(self) -> None:
-        self._write_step("imported-part")
-        assembly_path = self._write_assembly_generator(
-            "robot",
-            instances=[
-                {
-                    "path": "imported-part.step",
-                    "name": "leaf",
-                    "transform": IDENTITY_TRANSFORM,
-                }
-            ],
-            with_dxf=True,
-            with_urdf=True,
-        )
-        spec = next(spec for spec in cad_generation.list_entry_specs() if spec.cad_ref == self._cad_ref("robot"))
-
-        cad_generation.run_script_generator(spec, "gen_urdf")
-
-        self.assertEqual("gen_urdf\n", assembly_path.with_suffix(".calls").read_text(encoding="utf-8"))
-        self.assertFalse(assembly_path.with_suffix(".dxf").exists())
-        self.assertFalse(assembly_path.with_suffix(".step").exists())
-        self.assertTrue(assembly_path.with_suffix(".urdf").exists())
-
-    def test_gen_urdf_writes_explorer_metadata_sidecar(self) -> None:
-        script_path = self._generator_script(
-            "robot",
-            with_urdf=True,
-            urdf_explorer_metadata=(
-                "{'schemaVersion': 1, 'kind': 'texttocad-urdf-explorer', "
-                "'jointDefaultsByName': {'joint_1': 90}, 'poses': []}"
-            ),
-        )
-        spec = next(spec for spec in cad_generation.list_entry_specs() if spec.cad_ref == self._cad_ref("robot"))
-
-        cad_generation.run_script_generator(spec, "gen_urdf")
-
-        self.assertEqual(
-            {
-                "schemaVersion": 1,
-                "kind": "texttocad-urdf-explorer",
-                "jointDefaultsByName": {"joint_1": 90},
-                "poses": [],
-            },
-            json.loads((script_path.parent / ".robot.urdf" / "explorer.json").read_text(encoding="utf-8")),
-        )
 
     def test_sidecars_are_not_separate_generation_specs(self) -> None:
         self._generator_script("flat", with_dxf=True)
@@ -646,7 +544,6 @@ class CadGenerationTests(unittest.TestCase):
                     "transform": IDENTITY_TRANSFORM,
                 }
             ],
-            with_urdf=True,
         )
 
         cad_refs = {
@@ -658,7 +555,6 @@ class CadGenerationTests(unittest.TestCase):
         self.assertIn(self._cad_ref("flat"), cad_refs)
         self.assertIn(self._cad_ref("robot"), cad_refs)
         self.assertNotIn(self._cad_ref("flat") + ".dxf", cad_refs)
-        self.assertNotIn(self._cad_ref("robot") + ".urdf", cad_refs)
 
     def test_step_toml_target_is_not_supported(self) -> None:
         (self.temp_root / "broken.step.toml").write_text('kind = "part"\n', encoding="utf-8")
@@ -888,7 +784,6 @@ class CadGenerationTests(unittest.TestCase):
                 }
             ],
             with_dxf=True,
-            with_urdf=True,
             export_stl=True,
             export_3mf=True,
             stl_tolerance=0.8,
@@ -908,7 +803,6 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual("assembly", spec.kind)
         self.assertEqual(self.temp_root / "assembly.step", spec.step_path)
         self.assertEqual(self.temp_root / "assembly.dxf", spec.dxf_path)
-        self.assertEqual(self.temp_root / "assembly.urdf", spec.urdf_path)
         self.assertTrue(spec.export_stl)
         self.assertTrue(spec.export_3mf)
         self.assertEqual(0.8, spec.stl_tolerance)
@@ -1018,8 +912,8 @@ class CadGenerationTests(unittest.TestCase):
         script_path.write_text(
             "\n".join(
                 [
-                    "URDF_MATERIALS = {'black_aluminum': (0.168627, 0.184314, 0.2, 1.0)}",
-                    "URDF_STEP_MATERIALS = {'imports/sample_component.step': 'black_aluminum'}",
+                    "CAD_MATERIALS = {'black_aluminum': (0.168627, 0.184314, 0.2, 1.0)}",
+                    "CAD_STEP_MATERIALS = {'imports/sample_component.step': 'black_aluminum'}",
                     "",
                 ]
             ),

@@ -17,8 +17,7 @@ export const RENDER_FORMAT = {
   STEP: "step",
   STL: "stl",
   THREE_MF: "3mf",
-  DXF: "dxf",
-  URDF: "urdf"
+  DXF: "dxf"
 };
 
 export const TAB_TOOL_MODE = {

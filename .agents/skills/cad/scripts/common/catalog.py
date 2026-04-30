@@ -93,7 +93,6 @@ class CadSource:
     stl_path: Path | None = None
     three_mf_path: Path | None = None
     dxf_path: Path | None = None
-    urdf_path: Path | None = None
     export_stl: bool = False
     export_3mf: bool = False
     stl_tolerance: float | None = None
@@ -133,8 +132,6 @@ class CadSource:
                 paths.append(self.step_path)
             if self.dxf_path is not None:
                 paths.append(self.dxf_path)
-            if self.urdf_path is not None:
-                paths.append(self.urdf_path)
         if self.export_stl and self.stl_path is not None:
             paths.append(self.stl_path)
         if self.export_3mf and self.three_mf_path is not None:
@@ -242,7 +239,6 @@ def find_source_by_path(path: Path, root: Path | None = None) -> CadSource | Non
             source.step_path,
             source.script_path,
             source.dxf_path,
-            source.urdf_path,
             *source.generated_paths,
         ]
         if any(candidate is not None and candidate.resolve() == resolved_path for candidate in paths):
@@ -368,17 +364,6 @@ def _read_python_source(script_path: Path) -> CadSource | None:
         if metadata.has_gen_dxf
         else None
     )
-    urdf_path = (
-        _resolve_configured_artifact_path(
-            _required_output(metadata.urdf_output, script_path=resolved_script_path, field_name="urdf_output"),
-            base_path=resolved_script_path,
-            default_path=None,
-            expected_suffixes=(".urdf",),
-            field_name="urdf_output",
-        )
-        if metadata.has_gen_urdf
-        else None
-    )
     stl_path = (
         _resolve_configured_artifact_path(
             _required_output(metadata.stl_output, script_path=resolved_script_path, field_name="stl_output"),
@@ -414,7 +399,6 @@ def _read_python_source(script_path: Path) -> CadSource | None:
         stl_path=stl_path,
         three_mf_path=three_mf_path,
         dxf_path=dxf_path,
-        urdf_path=urdf_path,
         export_stl=metadata.export_stl,
         export_3mf=metadata.export_3mf,
         stl_tolerance=metadata.stl_tolerance,

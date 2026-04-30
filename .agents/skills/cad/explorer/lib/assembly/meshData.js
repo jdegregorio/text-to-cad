@@ -1,4 +1,4 @@
-import { mergeBounds, transformBounds, transformPoint } from "../urdf/kinematics.js";
+import { mergeBounds, transformBounds, transformPoint } from "../geometry/transforms.js";
 
 const IDENTITY_TRANSFORM = Object.freeze([
   1, 0, 0, 0,

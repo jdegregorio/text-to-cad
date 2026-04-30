@@ -1,6 +1,5 @@
 import {
   Copy,
-  Crosshair,
   Download,
   MousePointer2,
   Play,
@@ -26,9 +25,6 @@ function DesktopFloatingToolBar({
   selectionToolActive,
   referenceSelectionPending = false,
   referenceSelectionUnavailable = false,
-  urdfPosePickerAvailable = false,
-  urdfPosePickerActive = false,
-  handleToggleUrdfPosePicker,
   drawToolActive,
   handleSelectTabToolMode,
   explorerLoading,
@@ -48,12 +44,10 @@ function DesktopFloatingToolBar({
   handleScreenshotDownload
 }) {
   const dxfMode = renderFormat === RENDER_FORMAT.DXF;
-  const urdfMode = renderFormat === RENDER_FORMAT.URDF;
   const stlMode = renderFormat === RENDER_FORMAT.STL;
   const meshOnlyMode = stlMode || renderFormat === RENDER_FORMAT.THREE_MF;
   const captureDisabled = explorerLoading || (dxfMode ? !selectedDxfData : !selectedMeshData);
   const selectDisabled = explorerLoading || !selectedMeshData || referenceSelectionPending || referenceSelectionUnavailable;
-  const posePickerDisabled = explorerLoading || !selectedMeshData || !urdfPosePickerAvailable;
   const selectLabel = referenceSelectionUnavailable
     ? "Selectable topology unavailable"
     : referenceSelectionPending
@@ -69,7 +63,7 @@ function DesktopFloatingToolBar({
         <div className={`pointer-events-auto inline-flex w-fit items-center gap-1 self-end rounded-md p-1 ${FLOATING_TOOL_BAR_SURFACE_CLASS}`}>
           {!dxfMode ? (
             <>
-              {!urdfMode && !meshOnlyMode ? (
+              {!meshOnlyMode ? (
                 <>
                   <ToolbarButton
                     label={selectLabel}
@@ -91,18 +85,6 @@ function DesktopFloatingToolBar({
                     <PenTool className="size-3.5" strokeWidth={2} aria-hidden="true" />
                   </ToolbarButton>
                 </>
-              ) : null}
-
-              {urdfMode ? (
-                <ToolbarButton
-                  label="Select Pose"
-                  active={urdfPosePickerActive}
-                  onClick={handleToggleUrdfPosePicker}
-                  disabled={posePickerDisabled}
-                  aria-pressed={urdfPosePickerActive}
-                >
-                  <Crosshair className="size-3.5" strokeWidth={2} aria-hidden="true" />
-                </ToolbarButton>
               ) : null}
 
               <ToolbarButton
@@ -171,9 +153,6 @@ function MobileFloatingToolBar({
   selectionToolActive,
   referenceSelectionPending = false,
   referenceSelectionUnavailable = false,
-  urdfPosePickerAvailable = false,
-  urdfPosePickerActive = false,
-  handleToggleUrdfPosePicker,
   handleSelectTabToolMode,
   explorerLoading,
   selectedMeshData,
@@ -182,12 +161,10 @@ function MobileFloatingToolBar({
   handleScreenshotCopy
 }) {
   const dxfMode = renderFormat === RENDER_FORMAT.DXF;
-  const urdfMode = renderFormat === RENDER_FORMAT.URDF;
   const stlMode = renderFormat === RENDER_FORMAT.STL;
   const meshOnlyMode = stlMode || renderFormat === RENDER_FORMAT.THREE_MF;
   const captureDisabled = explorerLoading || (dxfMode ? !selectedDxfData : !selectedMeshData);
   const selectDisabled = explorerLoading || !selectedMeshData || referenceSelectionPending || referenceSelectionUnavailable;
-  const posePickerDisabled = explorerLoading || !selectedMeshData || !urdfPosePickerAvailable;
   const selectLabel = referenceSelectionUnavailable
     ? "Selectable topology unavailable"
     : referenceSelectionPending
@@ -222,7 +199,7 @@ function MobileFloatingToolBar({
           >
             {!dxfMode ? (
               <>
-                {urdfMode || meshOnlyMode ? null : (
+                {meshOnlyMode ? null : (
                   <>
                     <ToolbarTextButton
                       label={selectLabel}
@@ -253,19 +230,6 @@ function MobileFloatingToolBar({
                     </ToolbarTextButton>
                   </>
                 )}
-                {urdfMode ? (
-                  <ToolbarTextButton
-                    label="Select Pose"
-                    active={urdfPosePickerActive}
-                    onClick={handleToggleUrdfPosePicker}
-                    disabled={posePickerDisabled}
-                    className={MOBILE_TOOL_BUTTON_CLASS}
-                    aria-pressed={urdfPosePickerActive}
-                  >
-                    <Crosshair className="size-4" strokeWidth={2} aria-hidden="true" />
-                    <span>Pose</span>
-                  </ToolbarTextButton>
-                ) : null}
               </>
             ) : null}
 

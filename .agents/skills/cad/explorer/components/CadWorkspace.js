@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeftRight, ArrowRight, Circle, Eraser, Minus, PaintBucket, PenTool, Square } from "lucide-react";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import CadRenderPane from "./workbench/CadRenderPane";
@@ -9,7 +9,6 @@ import FileExplorerSidebar from "./workbench/FileExplorerSidebar";
 import LookSettingsPopover from "./workbench/LookSettingsPopover";
 import StepAssemblyFileSheet from "./workbench/StepAssemblyFileSheet";
 import StatusToast from "./workbench/StatusToast";
-import UrdfFileSheet from "./workbench/UrdfFileSheet";
 import ExplorerAlertDialog from "./workbench/ExplorerAlertDialog";
 import ExplorerLoadingOverlay from "./workbench/ExplorerLoadingOverlay";
 import CadWorkspaceAssemblyInspectPill from "./workbench/CadWorkspaceAssemblyInspectPill";
@@ -87,26 +86,6 @@ import {
   DEFAULT_DXF_PREVIEW_THICKNESS_MM,
   normalizeDxfPreviewThicknessMm
 } from "../lib/dxf/buildPreviewMesh";
-import {
-  buildDefaultUrdfJointValues,
-  buildUrdfMeshGeometry,
-  clampJointValueDeg,
-  linkOriginInFrame,
-  poseUrdfMeshData,
-  rootPointInFrame
-} from "../lib/urdf/kinematics";
-import {
-  measureUrdfMotionResult,
-  normalizeMotionTargetPosition,
-  validateUrdfMotionTrajectory,
-  validateUrdfMotionJointValues
-} from "../lib/urdf/motion";
-import { checkMotionServerLive, requestMotionServer } from "../lib/urdf/motionServerClient";
-import {
-  advanceUrdfJointValues,
-  jointValueMapsClose,
-  URDF_JOINT_ANIMATION_FOLLOW_MS
-} from "../lib/urdf/jointAnimation";
 import { buildSelectorRuntime } from "../lib/selectors/runtime";
 import {
   assemblyBreadcrumb,
@@ -124,16 +103,8 @@ const EMPTY_LIST = Object.freeze([]);
 const CAD_BUILD_COMMANDS = {
   dxf: "python .agents/skills/cad/scripts/gen_dxf/cli.py",
   stepAssembly: "python .agents/skills/cad/scripts/gen_step_assembly/cli.py",
-  stepPart: "python .agents/skills/cad/scripts/gen_step_part/cli.py",
-  urdf: "python .agents/skills/urdf/scripts/gen_urdf/cli.py"
+  stepPart: "python .agents/skills/cad/scripts/gen_step_part/cli.py"
 };
-const DEFAULT_URDF_ANIMATION_SETTINGS = Object.freeze({
-  introEnabled: false,
-  speed: 1
-});
-const URDF_POSE_PICKER_DEFAULT_CENTER = Object.freeze([0, 0, 0]);
-const MIN_URDF_ANIMATION_SPEED = 0.25;
-const MAX_URDF_ANIMATION_SPEED = 2.5;
 const DESKTOP_SIDEBAR_MIN_WIDTH = 150;
 const DESKTOP_SIDEBAR_MAX_WIDTH = 520;
 const DEFAULT_SIDEBAR_WIDTH = CAD_WORKSPACE_DEFAULT_SIDEBAR_WIDTH;
@@ -156,272 +127,12 @@ function toFiniteNumber(value, fallback = 0) {
   return Number.isFinite(numericValue) ? numericValue : fallback;
 }
 
-function animationNowMs() {
-  if (typeof performance !== "undefined" && typeof performance.now === "function") {
-    return performance.now();
-  }
-  return Date.now();
-}
-
 function readWorkspaceViewportWidth() {
   if (typeof window === "undefined") {
     return 1600;
   }
   const width = Number(window.innerWidth);
   return Number.isFinite(width) && width > 0 ? width : 1600;
-}
-
-function cloneJointValueMap(values) {
-  if (!values || typeof values !== "object") {
-    return {};
-  }
-  return Object.fromEntries(
-    Object.entries(values)
-      .map(([name, value]) => [String(name || "").trim(), toFiniteNumber(value, 0)])
-      .filter(([name]) => name)
-  );
-}
-
-function jointValueMapAnimationSignature(values) {
-  return JSON.stringify(
-    Object.entries(cloneJointValueMap(values))
-      .sort(([leftName], [rightName]) => leftName.localeCompare(rightName))
-  );
-}
-
-function interpolateTrajectoryJointValues(trajectory, elapsedSec, fallbackValues = {}) {
-  const points = Array.isArray(trajectory?.points) ? trajectory.points : [];
-  if (!points.length) {
-    return cloneJointValueMap(fallbackValues);
-  }
-  const firstPoint = points[0];
-  if (elapsedSec <= toFiniteNumber(firstPoint.timeFromStartSec, 0)) {
-    return {
-      ...cloneJointValueMap(fallbackValues),
-      ...cloneJointValueMap(firstPoint.positionsByNameDeg)
-    };
-  }
-  for (let index = 1; index < points.length; index += 1) {
-    const previousPoint = points[index - 1];
-    const nextPoint = points[index];
-    const previousTime = toFiniteNumber(previousPoint.timeFromStartSec, 0);
-    const nextTime = toFiniteNumber(nextPoint.timeFromStartSec, previousTime);
-    if (elapsedSec > nextTime) {
-      continue;
-    }
-    const span = Math.max(nextTime - previousTime, 1e-6);
-    const progress = Math.min(Math.max((elapsedSec - previousTime) / span, 0), 1);
-    const previousValues = cloneJointValueMap(previousPoint.positionsByNameDeg);
-    const nextValues = cloneJointValueMap(nextPoint.positionsByNameDeg);
-    const interpolated = {};
-    for (const [jointName, nextValue] of Object.entries(nextValues)) {
-      const previousValue = Object.hasOwn(previousValues, jointName) ? previousValues[jointName] : nextValue;
-      interpolated[jointName] = previousValue + ((nextValue - previousValue) * progress);
-    }
-    return {
-      ...cloneJointValueMap(fallbackValues),
-      ...interpolated
-    };
-  }
-  return {
-    ...cloneJointValueMap(fallbackValues),
-    ...cloneJointValueMap(points[points.length - 1].positionsByNameDeg)
-  };
-}
-
-function roundedUrdfJointValue(value) {
-  const numericValue = toFiniteNumber(value, 0);
-  const rounded = Math.round(numericValue * 1000) / 1000;
-  return Object.is(rounded, -0) ? 0 : rounded;
-}
-
-function emptyUrdfPosePickerState() {
-  return {
-    fileRef: "",
-    originalPerspective: null
-  };
-}
-
-function normalizePoint3(value) {
-  if (!Array.isArray(value) || value.length < 3) {
-    return null;
-  }
-  const point = [Number(value[0]), Number(value[1]), Number(value[2])];
-  return point.every(Number.isFinite) ? point : null;
-}
-
-function normalizeUrdfIntroAnimationEnabled(value) {
-  return value === true;
-}
-
-function normalizeUrdfAnimationSpeed(value, fallback = DEFAULT_URDF_ANIMATION_SETTINGS.speed) {
-  const numericValue = toFiniteNumber(value, fallback);
-  return Math.min(Math.max(numericValue, MIN_URDF_ANIMATION_SPEED), MAX_URDF_ANIMATION_SPEED);
-}
-
-function buildUrdfJointAnglesCopyText(joints, jointValues) {
-  const movableJoints = Array.isArray(joints) ? joints : [];
-  return JSON.stringify(
-    Object.fromEntries(
-      movableJoints.map((joint) => {
-        const jointName = String(joint?.name || "").trim();
-        const value = roundedUrdfJointValue(jointValues?.[jointName] ?? joint?.defaultValueDeg ?? 0);
-        return [jointName, value];
-      }).filter(([name]) => name)
-    ),
-    null,
-    2
-  );
-}
-
-function buildUrdfLinkIntroOrderMap(urdfData) {
-  const orderByLink = new Map();
-  const rootLink = String(urdfData?.rootLink || "").trim();
-  if (rootLink) {
-    orderByLink.set(rootLink, 0);
-  }
-  const joints = Array.isArray(urdfData?.joints) ? urdfData.joints : [];
-  joints.forEach((joint, index) => {
-    const parentLink = String(joint?.parentLink || "").trim();
-    const childLink = String(joint?.childLink || "").trim();
-    if (!childLink) {
-      return;
-    }
-    const parentOrder = orderByLink.get(parentLink);
-    const introOrder = Number.isFinite(parentOrder) ? parentOrder + 1 : index + 1;
-    orderByLink.set(childLink, introOrder);
-  });
-  return orderByLink;
-}
-
-function buildUrdfWrappedJointNameSet(urdfData) {
-  return new Set(
-    (Array.isArray(urdfData?.joints) ? urdfData.joints : [])
-      .filter((joint) => String(joint?.type || "").trim().toLowerCase() === "continuous")
-      .map((joint) => String(joint?.name || "").trim())
-      .filter(Boolean)
-  );
-}
-
-function useAnimatedUrdfJointValues(
-  targetValues,
-  animationKey,
-  animationSettings = DEFAULT_URDF_ANIMATION_SETTINGS,
-  wrappedJointNames = null
-) {
-  const initialAnimationKey = String(animationKey || "");
-  const [displayValues, setDisplayValues] = useState(() => cloneJointValueMap(targetValues));
-  const displayValuesRef = useRef(displayValues);
-  const targetValuesRef = useRef(cloneJointValueMap(targetValues));
-  const animationRef = useRef({
-    frameId: 0,
-    key: initialAnimationKey,
-    lastTimestamp: 0,
-    targetSignature: jointValueMapAnimationSignature(targetValues)
-  });
-
-  useEffect(() => {
-    displayValuesRef.current = displayValues;
-  }, [displayValues]);
-
-  const animationSpeed = normalizeUrdfAnimationSpeed(animationSettings?.speed);
-
-  const cancelAnimation = () => {
-    if (animationRef.current.frameId && typeof cancelAnimationFrame === "function") {
-      cancelAnimationFrame(animationRef.current.frameId);
-    }
-    animationRef.current.frameId = 0;
-    animationRef.current.lastTimestamp = 0;
-  };
-
-  const snapToTarget = (targetSnapshot) => {
-    displayValuesRef.current = targetSnapshot;
-    setDisplayValues(targetSnapshot);
-  };
-
-  const scheduleAnimation = (key) => {
-    if (animationRef.current.frameId || typeof requestAnimationFrame !== "function") {
-      return;
-    }
-
-    const stepAnimation = (timestamp) => {
-      if (animationRef.current.key !== key) {
-        animationRef.current.frameId = 0;
-        animationRef.current.lastTimestamp = 0;
-        return;
-      }
-
-      const timestampMs = toFiniteNumber(timestamp, animationNowMs());
-      const lastTimestamp = animationRef.current.lastTimestamp || Math.max(timestampMs - 16, 0);
-      const deltaMs = Math.min(Math.max(timestampMs - lastTimestamp, 0), 50);
-      animationRef.current.lastTimestamp = timestampMs;
-
-      const { values, done } = advanceUrdfJointValues(
-        displayValuesRef.current,
-        targetValuesRef.current,
-        deltaMs,
-        URDF_JOINT_ANIMATION_FOLLOW_MS / animationSpeed,
-        undefined,
-        wrappedJointNames
-      );
-      displayValuesRef.current = values;
-      setDisplayValues(values);
-
-      if (done) {
-        animationRef.current.frameId = 0;
-        animationRef.current.lastTimestamp = 0;
-        return;
-      }
-
-      animationRef.current.frameId = requestAnimationFrame(stepAnimation);
-    };
-
-    animationRef.current.frameId = requestAnimationFrame(stepAnimation);
-  };
-
-  useEffect(() => {
-    const nextKey = String(animationKey || "");
-    const targetSnapshot = cloneJointValueMap(targetValues);
-    const targetSignature = jointValueMapAnimationSignature(targetSnapshot);
-    const keyChanged = animationRef.current.key !== nextKey;
-    const targetChanged = animationRef.current.targetSignature !== targetSignature;
-    targetValuesRef.current = targetSnapshot;
-
-    if (keyChanged) {
-      cancelAnimation();
-      animationRef.current.key = nextKey;
-      animationRef.current.targetSignature = targetSignature;
-      snapToTarget(targetSnapshot);
-      return undefined;
-    }
-
-    if (!nextKey || typeof requestAnimationFrame !== "function") {
-      cancelAnimation();
-      animationRef.current.targetSignature = targetSignature;
-      snapToTarget(targetSnapshot);
-      return undefined;
-    }
-
-    if (jointValueMapsClose(displayValuesRef.current, targetSnapshot)) {
-      cancelAnimation();
-      animationRef.current.targetSignature = targetSignature;
-      snapToTarget(targetSnapshot);
-      return undefined;
-    }
-
-    if (targetChanged) {
-      cancelAnimation();
-      animationRef.current.targetSignature = targetSignature;
-    }
-    scheduleAnimation(nextKey);
-    return undefined;
-  }, [animationKey, animationSpeed, targetValues, wrappedJointNames]);
-
-  useEffect(() => () => {
-    cancelAnimation();
-  }, []);
-
-  return displayValues;
 }
 
 function meshAssetKeyForEntry(entry) {
@@ -450,12 +161,6 @@ function buildDxfCacheKey(entry) {
   return fileRef && dxfHash ? `${fileRef}:${dxfHash}` : "";
 }
 
-function buildUrdfCacheKey(entry) {
-  const fileRef = fileKey(entry);
-  const urdfHash = entryUrdfAssetHash(entry);
-  return fileRef && urdfHash ? `${fileRef}:${urdfHash}` : "";
-}
-
 function entryAsset(entry, key) {
   return entry?.assets?.[key] || null;
 }
@@ -468,21 +173,10 @@ function entryAssetHash(entry, key) {
   return String(entryAsset(entry, key)?.hash || "").trim();
 }
 
-function entryUrdfAssetHash(entry) {
-  return [
-    entryAssetHash(entry, "urdf"),
-    entryAssetHash(entry, "explorerMetadata"),
-    entryAssetHash(entry, "motionExplorerMetadata")
-  ].filter(Boolean).join(":");
-}
-
 function buildCadCommand(fileRef, entry = null) {
   const sourceFormat = entrySourceFormat(entry);
   if (sourceFormat === RENDER_FORMAT.DXF) {
     return `${CAD_BUILD_COMMANDS.dxf} ${fileRef}`;
-  }
-  if (sourceFormat === RENDER_FORMAT.URDF) {
-    return `${CAD_BUILD_COMMANDS.urdf} ${fileRef}`;
   }
   if (sourceFormat === RENDER_FORMAT.STL) {
     return "";
@@ -505,10 +199,6 @@ function entryHasMesh(entry) {
   }
   const meshKey = meshAssetKeyForEntry(entry);
   return Boolean(entryAssetUrl(entry, meshKey) && entryAssetHash(entry, meshKey));
-}
-
-function entryHasUrdf(entry) {
-  return Boolean(entryAssetUrl(entry, "urdf") && entryAssetHash(entry, "urdf"));
 }
 
 function entryHasReferences(entry) {
@@ -535,9 +225,6 @@ function entrySourceFormat(entry) {
   if (kind === RENDER_FORMAT.THREE_MF) {
     return RENDER_FORMAT.THREE_MF;
   }
-  if (kind === RENDER_FORMAT.URDF) {
-    return RENDER_FORMAT.URDF;
-  }
   return RENDER_FORMAT.STEP;
 }
 
@@ -545,9 +232,6 @@ function fileSheetKindForEntry(entry) {
   const kind = String(entry?.kind || "").trim().toLowerCase();
   if (kind === "dxf") {
     return "dxf";
-  }
-  if (kind === "urdf") {
-    return "urdf";
   }
   if (kind === "assembly") {
     return "stepAssembly";
@@ -1174,8 +858,6 @@ export default function CadWorkspace({
   const [stepUpdateInProgress, setStepUpdateInProgress] = useState(false);
   const [screenshotStatus, setScreenshotStatus] = useState("");
   const [persistenceStatus, setPersistenceStatus] = useState("");
-  const [motionErrorStatus, setMotionErrorStatus] = useState("");
-  const [robotMotionServerLive, setRobotMotionServerLive] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
@@ -1197,21 +879,11 @@ export default function CadWorkspace({
   const [drawingStrokes, setDrawingStrokes] = useState([]);
   const [drawingUndoStack, setDrawingUndoStack] = useState([]);
   const [drawingRedoStack, setDrawingRedoStack] = useState([]);
-  const [jointValuesByFileRef, setJointValuesByFileRef] = useState({});
-  const [urdfMotionStateByFileRef, setUrdfMotionStateByFileRef] = useState({});
-  const [urdfAnimationSettingsByFileRef, setUrdfAnimationSettingsByFileRef] = useState({});
-  const [urdfEntryAnimationEnabled, setUrdfEntryAnimationEnabled] = useState(DEFAULT_URDF_ANIMATION_SETTINGS.introEnabled);
-  const [urdfPosePickerState, setUrdfPosePickerState] = useState(emptyUrdfPosePickerState);
-  const [selectedUrdfIntroReplayToken, setSelectedUrdfIntroReplayToken] = useState(0);
   const [pendingCadRefQueryParams, setPendingCadRefQueryParams] = useState(() => readCadRefQueryParams());
   const [inspectedAssemblyReferenceState, setInspectedAssemblyReferenceState] = useState(null);
   const [inspectedAssemblyReferenceStatus, setInspectedAssemblyReferenceStatus] = useState(REFERENCE_STATUS.IDLE);
   const [, setInspectedAssemblyReferenceError] = useState("");
   const lastPersistenceFailureKeyRef = useRef("");
-  const urdfTrajectoryPlaybackRef = useRef({
-    frameId: 0,
-    token: 0
-  });
 
   const handlePersistenceWriteError = useCallback(({ key }) => {
     const failureKey = String(key || "browser-storage");
@@ -1247,13 +919,6 @@ export default function CadWorkspace({
     dxfError,
     setDxfError,
     dxfLoadStage,
-    urdfState,
-    setUrdfState,
-    urdfStatus,
-    setUrdfStatus,
-    urdfError,
-    setUrdfError,
-    urdfLoadStage,
     referenceState,
     setReferenceState,
     referenceStatus,
@@ -1263,14 +928,11 @@ export default function CadWorkspace({
     getCachedMeshState,
     getCachedReferenceState,
     getCachedDxfState,
-    getCachedUrdfState,
     cancelMeshLoad,
     cancelDxfLoad,
-    cancelUrdfLoad,
     cancelReferenceLoad,
     loadMeshForEntry,
     loadDxfForEntry,
-    loadUrdfForEntry,
     loadReferencesForEntry
   } = useCadAssets({
     entryHasMesh,
@@ -1312,9 +974,7 @@ export default function CadWorkspace({
   const selectedEntrySourceFormat = entrySourceFormat(selectedEntry);
   const selectedFileSheetKind = fileSheetKindForEntry(selectedEntry);
   const isAssemblyView = selectedEntry?.kind === "assembly";
-  const isUrdfView = selectedEntry?.kind === "urdf";
   const selectedEntryHasMesh = entryHasMesh(selectedEntry);
-  const selectedEntryHasUrdf = entryHasUrdf(selectedEntry);
   const selectedEntryHasReferences = entryHasReferences(selectedEntry);
   const selectedEntryHasDxf = entryHasDxf(selectedEntry);
   const selectedMeshHash = String(
@@ -1344,237 +1004,11 @@ export default function CadWorkspace({
     !!selectedEntry &&
     dxfState.file === fileKey(selectedEntry) &&
     dxfState.dxfHash === entryAssetHash(selectedEntry, "dxf");
-  const selectedUrdfMatches =
-    !!urdfState &&
-    !!selectedEntry &&
-    urdfState.file === fileKey(selectedEntry) &&
-    urdfState.urdfHash === entryUrdfAssetHash(selectedEntry);
-  const selectedUrdfData = selectedUrdfMatches ? urdfState.urdfData : null;
-  const selectedUrdfMeshes = selectedUrdfMatches ? urdfState.meshesByUrl : null;
   const selectedDxfData = selectedDxfMatches ? dxfState.dxfData : null;
   const selectedDxfFileRef = selectedEntrySourceFormat === RENDER_FORMAT.DXF
     ? fileKey(selectedEntry)
     : "";
-  const selectedUrdfFileRef = selectedEntrySourceFormat === RENDER_FORMAT.URDF
-    ? fileKey(selectedEntry)
-    : "";
-  const defaultSelectedUrdfJointValues = useMemo(
-    () => buildDefaultUrdfJointValues(selectedUrdfData),
-    [selectedUrdfData]
-  );
-  const storedSelectedUrdfJointValues = useMemo(() => {
-    if (!selectedUrdfFileRef) {
-      return {};
-    }
-    const storedValues = jointValuesByFileRef?.[selectedUrdfFileRef];
-    return storedValues && typeof storedValues === "object" ? storedValues : {};
-  }, [jointValuesByFileRef, selectedUrdfFileRef]);
-  const selectedUrdfJointValues = useMemo(
-    () => ({ ...defaultSelectedUrdfJointValues, ...storedSelectedUrdfJointValues }),
-    [defaultSelectedUrdfJointValues, storedSelectedUrdfJointValues]
-  );
-  const selectedUrdfAnimationSettings = useMemo(() => {
-    return {
-      introEnabled: normalizeUrdfIntroAnimationEnabled(urdfEntryAnimationEnabled),
-      speed: selectedUrdfFileRef
-        ? normalizeUrdfAnimationSpeed(urdfAnimationSettingsByFileRef?.[selectedUrdfFileRef]?.speed)
-        : DEFAULT_URDF_ANIMATION_SETTINGS.speed
-    };
-  }, [selectedUrdfFileRef, urdfAnimationSettingsByFileRef, urdfEntryAnimationEnabled]);
-  const selectedUrdfPoses = useMemo(
-    () => (
-      Array.isArray(selectedUrdfData?.poses)
-        ? selectedUrdfData.poses.map((pose) => ({
-          ...pose,
-          resolvedJointValues: {
-            ...defaultSelectedUrdfJointValues,
-            ...(pose?.jointValuesByName && typeof pose.jointValuesByName === "object" ? pose.jointValuesByName : {})
-          }
-        }))
-        : []
-    ),
-    [defaultSelectedUrdfJointValues, selectedUrdfData]
-  );
-  const activeSelectedUrdfPoseName = useMemo(
-    () => (
-      selectedUrdfPoses.find((pose) => jointValueMapsClose(selectedUrdfJointValues, pose.resolvedJointValues))?.name || ""
-    ),
-    [selectedUrdfJointValues, selectedUrdfPoses]
-  );
-  const selectedUrdfMotion = useMemo(() => {
-    const motion = selectedUrdfData?.motion;
-    const endEffectors = Array.isArray(motion?.endEffectors) ? motion.endEffectors : [];
-    return endEffectors.length ? { ...motion, endEffectors } : null;
-  }, [selectedUrdfData]);
-  const selectedUrdfMotionConfigKey = useMemo(() => {
-    if (!selectedUrdfFileRef || !selectedUrdfMotion?.motionServer) {
-      return "";
-    }
-    return `${selectedUrdfFileRef}:${entryUrdfAssetHash(selectedEntry) || ""}`;
-  }, [selectedEntry, selectedUrdfFileRef, selectedUrdfMotion]);
-  useEffect(() => {
-    let active = true;
-    let probeTimer = 0;
-    const clearProbeTimer = () => {
-      if (!probeTimer) {
-        return;
-      }
-      clearTimeout(probeTimer);
-      probeTimer = 0;
-    };
-    if (!selectedUrdfMotionConfigKey) {
-      setRobotMotionServerLive(false);
-      return () => {
-        active = false;
-        clearProbeTimer();
-      };
-    }
-    setRobotMotionServerLive(false);
-    const probeServer = async () => {
-      const live = await checkMotionServerLive({ timeoutMs: 750 });
-      if (!active) {
-        return;
-      }
-      setRobotMotionServerLive(live);
-      probeTimer = setTimeout(probeServer, live ? 5000 : 2000);
-    };
-    void probeServer();
-    return () => {
-      active = false;
-      clearProbeTimer();
-    };
-  }, [selectedUrdfMotionConfigKey]);
-  const selectedUrdfMotionControls = robotMotionServerLive ? selectedUrdfMotion : null;
-  const selectedUrdfMotionState = useMemo(() => {
-    if (!selectedUrdfFileRef) {
-      return {};
-    }
-    const state = urdfMotionStateByFileRef?.[selectedUrdfFileRef];
-    return state && typeof state === "object" ? state : {};
-  }, [selectedUrdfFileRef, urdfMotionStateByFileRef]);
-  const selectedUrdfMotionEndEffectors = selectedUrdfMotionControls?.endEffectors || EMPTY_LIST;
-  const selectedUrdfMotionEndEffectorName = useMemo(() => {
-    const storedName = String(selectedUrdfMotionState.activeEndEffectorName || "").trim();
-    if (storedName && selectedUrdfMotionEndEffectors.some((endEffector) => String(endEffector?.name || "").trim() === storedName)) {
-      return storedName;
-    }
-    return String(selectedUrdfMotionEndEffectors[0]?.name || "").trim();
-  }, [selectedUrdfMotionEndEffectors, selectedUrdfMotionState.activeEndEffectorName]);
-  const selectedUrdfMotionEndEffector = useMemo(() => (
-    selectedUrdfMotionEndEffectors.find((endEffector) => String(endEffector?.name || "").trim() === selectedUrdfMotionEndEffectorName) || null
-  ), [selectedUrdfMotionEndEffectorName, selectedUrdfMotionEndEffectors]);
-  const selectedUrdfMotionCurrentPosition = useMemo(() => {
-    if (!selectedUrdfData || !selectedUrdfMotionEndEffector) {
-      return null;
-    }
-    return linkOriginInFrame(
-      selectedUrdfData,
-      selectedUrdfJointValues,
-      selectedUrdfMotionEndEffector.link,
-      selectedUrdfMotionEndEffector.frame
-    );
-  }, [selectedUrdfData, selectedUrdfMotionEndEffector, selectedUrdfJointValues]);
-  const selectedUrdfMotionTargetPosition = useMemo(() => {
-    const targetsByEndEffector = selectedUrdfMotionState.targetsByEndEffector && typeof selectedUrdfMotionState.targetsByEndEffector === "object"
-      ? selectedUrdfMotionState.targetsByEndEffector
-      : {};
-    const storedTarget = selectedUrdfMotionEndEffectorName ? targetsByEndEffector[selectedUrdfMotionEndEffectorName] : null;
-    return normalizeMotionTargetPosition(storedTarget, selectedUrdfMotionCurrentPosition || [0, 0, 0]);
-  }, [selectedUrdfMotionCurrentPosition, selectedUrdfMotionEndEffectorName, selectedUrdfMotionState.targetsByEndEffector]);
-  const selectedUrdfMotionSolving = Boolean(
-    selectedUrdfMotionEndEffectorName &&
-    selectedUrdfMotionState.solvingEndEffectorName === selectedUrdfMotionEndEffectorName
-  );
-  const selectedUrdfMotionCommand = selectedUrdfMotionControls?.canPlanToPose ? "urdf.planToPose" : "urdf.solvePose";
-  const selectedUrdfPosePickerState = selectedUrdfFileRef && urdfPosePickerState.fileRef === selectedUrdfFileRef
-    ? urdfPosePickerState
-    : null;
-  const urdfPosePickerActive = Boolean(
-    selectedUrdfFileRef &&
-    selectedUrdfMotionControls &&
-    selectedUrdfPosePickerState
-  );
-  const selectedUrdfAnimationKey = selectedUrdfFileRef
-    ? `${selectedUrdfFileRef}:${entryUrdfAssetHash(selectedEntry) || ""}`
-    : "";
-  const selectedUrdfIntroOrderByLink = useMemo(
-    () => buildUrdfLinkIntroOrderMap(selectedUrdfData),
-    [selectedUrdfData]
-  );
-  const selectedUrdfWrappedJointNames = useMemo(
-    () => buildUrdfWrappedJointNameSet(selectedUrdfData),
-    [selectedUrdfData]
-  );
-  const animatedSelectedUrdfJointValues = useAnimatedUrdfJointValues(
-    selectedUrdfJointValues,
-    selectedUrdfAnimationKey,
-    selectedUrdfAnimationSettings,
-    selectedUrdfWrappedJointNames
-  );
-  const selectedUrdfMeshGeometryResult = useMemo(() => {
-    if (!selectedUrdfData || !selectedUrdfMeshes) {
-      return {
-        meshData: null,
-        error: ""
-      };
-    }
-    try {
-      return {
-        meshData: buildUrdfMeshGeometry(selectedUrdfData, selectedUrdfMeshes),
-        error: ""
-      };
-    } catch (error) {
-      return {
-        meshData: null,
-        error: error instanceof Error ? error.message : String(error)
-      };
-    }
-  }, [selectedUrdfData, selectedUrdfMeshes]);
-  const movableUrdfJoints = useMemo(
-    () => (
-      Array.isArray(selectedUrdfData?.joints)
-        ? selectedUrdfData.joints.filter((joint) => String(joint?.type || "") !== "fixed" && !joint?.mimic)
-        : []
-    ),
-    [selectedUrdfData]
-  );
-  const selectedUrdfPreview = useMemo(() => {
-    if (!selectedUrdfData || !selectedUrdfMeshGeometryResult.meshData) {
-      return {
-        meshData: null,
-        error: selectedUrdfMeshGeometryResult.error,
-        linkWorldTransforms: new Map()
-      };
-    }
-    try {
-      const posedPreview = poseUrdfMeshData(
-        selectedUrdfData,
-        selectedUrdfMeshGeometryResult.meshData,
-        animatedSelectedUrdfJointValues
-      );
-      selectedUrdfMeshGeometryResult.meshData.parts = posedPreview.meshData.parts.map((part) => ({
-        ...part,
-        introOrder: selectedUrdfIntroOrderByLink.get(String(part?.linkName || "").trim()) ?? 0
-      }));
-      selectedUrdfMeshGeometryResult.meshData.bounds = posedPreview.meshData.bounds;
-      return {
-        ...posedPreview,
-        meshData: selectedUrdfMeshGeometryResult.meshData,
-        error: ""
-      };
-    } catch (error) {
-      return {
-        meshData: null,
-        error: error instanceof Error ? error.message : String(error),
-        linkWorldTransforms: new Map()
-      };
-    }
-  }, [animatedSelectedUrdfJointValues, selectedUrdfData, selectedUrdfIntroOrderByLink, selectedUrdfMeshGeometryResult]);
-  const selectedMeshData = selectedEntrySourceFormat === RENDER_FORMAT.URDF
-    ? selectedUrdfPreview.meshData
-    : selectedMeshMatches
-      ? meshState.meshData
-      : null;
+  const selectedMeshData = selectedMeshMatches ? meshState.meshData : null;
   const assemblyRoot = selectedAssemblyStructureReady
     ? selectedMeshData?.assemblyRoot || null
     : null;
@@ -1636,7 +1070,6 @@ export default function CadWorkspace({
   const renderPartIdForAssemblySelection = useCallback((partId, fallbackPartId = "") => {
     return renderPartIdsForAssemblySelection(partId, fallbackPartId)[0] || "";
   }, [renderPartIdsForAssemblySelection]);
-  const selectedUrdfPreviewError = selectedUrdfPreview.error;
   const selectedDxfBendLines = useMemo(() => {
     if (!selectedDxfData) {
       return [];
@@ -1714,19 +1147,13 @@ export default function CadWorkspace({
     !!selectedEntry &&
     dxfStatus !== ASSET_STATUS.ERROR &&
     (!selectedDxfMatches || dxfStatus === ASSET_STATUS.LOADING);
-  const urdfExplorerLoading =
-    !!selectedEntry &&
-    urdfStatus !== ASSET_STATUS.ERROR &&
-    (!selectedUrdfMatches || urdfStatus === ASSET_STATUS.LOADING);
   const stepExplorerLoading =
     !!selectedEntry &&
     status !== ASSET_STATUS.ERROR &&
     (!selectedMeshMatches || status === ASSET_STATUS.LOADING);
   const explorerLoading = effectiveRenderFormat === RENDER_FORMAT.DXF
     ? dxfExplorerLoading
-    : effectiveRenderFormat === RENDER_FORMAT.URDF
-      ? urdfExplorerLoading
-      : stepExplorerLoading;
+    : stepExplorerLoading;
   const assemblySidebarLoading =
     isAssemblyView &&
     selectedMeshMatches &&
@@ -1742,9 +1169,7 @@ export default function CadWorkspace({
     ? selectedEntry && !selectedEntryHasDxf
       ? "Generating DXF preview..."
       : "Loading DXF preview..."
-    : effectiveRenderFormat === RENDER_FORMAT.URDF
-      ? "Loading URDF robot..."
-      : effectiveRenderFormat === RENDER_FORMAT.STL
+    : effectiveRenderFormat === RENDER_FORMAT.STL
         ? "Loading STL..."
         : effectiveRenderFormat === RENDER_FORMAT.THREE_MF
           ? "Loading 3MF..."
@@ -1765,13 +1190,6 @@ export default function CadWorkspace({
         selectedDxfPreviewError
       );
     }
-    if (effectiveRenderFormat === RENDER_FORMAT.URDF) {
-      return buildExplorerMeshAlert(
-        selectedEntry,
-        !!selectedMeshData,
-        urdfStatus === ASSET_STATUS.ERROR ? urdfError : selectedUrdfPreviewError
-      ) || explorerRuntimeAlert;
-    }
     const meshAlert = buildExplorerMeshAlert(
       selectedEntry,
       !!selectedMeshData,
@@ -1787,10 +1205,7 @@ export default function CadWorkspace({
     selectedDxfData,
     selectedEntry,
     selectedMeshData,
-    selectedUrdfPreviewError,
     status,
-    urdfError,
-    urdfStatus,
     explorerLoading,
     explorerRuntimeAlert
   ]);
@@ -2093,8 +1508,7 @@ export default function CadWorkspace({
       desktopLookSheetOpen: desktopLookMenuOpen,
       mobileLookSheetOpen: mobileLookMenuOpen,
       sidebarWidth,
-      tabToolsWidth,
-      urdfEntryAnimationEnabled
+      tabToolsWidth
     });
   }, [
     buildActiveTabSnapshot,
@@ -2110,7 +1524,6 @@ export default function CadWorkspace({
     sidebarOpen,
     sidebarWidth,
     tabToolsWidth,
-    urdfEntryAnimationEnabled,
     upsertTabRecord
   ]);
 
@@ -2244,7 +1657,6 @@ export default function CadWorkspace({
     const cachedMeshState = nextEntry ? getCachedMeshState(nextEntry) : null;
     const cachedReferenceState = nextEntry ? getCachedReferenceState(nextEntry) : null;
     const cachedDxfState = nextEntry ? getCachedDxfState(nextEntry) : null;
-    const cachedUrdfState = nextEntry ? getCachedUrdfState(nextEntry) : null;
     const currentSnapshot = selectedKey ? buildActiveTabSnapshot() : null;
 
     setOpenTabs((current) => {
@@ -2285,16 +1697,6 @@ export default function CadWorkspace({
       setDxfError("");
     }
 
-    if (!entryHasUrdf(nextEntry)) {
-      setUrdfState(null);
-      setUrdfStatus(ASSET_STATUS.PENDING);
-      setUrdfError("");
-    } else if (cachedUrdfState) {
-      setUrdfState(cachedUrdfState);
-      setUrdfStatus(ASSET_STATUS.READY);
-      setUrdfError("");
-    }
-
     applyTabRecord(nextTab);
   }, [
     applyTabRecord,
@@ -2304,14 +1706,10 @@ export default function CadWorkspace({
     getCachedDxfState,
     getCachedMeshState,
     getCachedReferenceState,
-    getCachedUrdfState,
     selectedKey,
     setDxfError,
     setDxfState,
     setDxfStatus,
-    setUrdfError,
-    setUrdfState,
-    setUrdfStatus,
     tabToolMode,
     upsertTabRecord
   ]);
@@ -2333,7 +1731,6 @@ export default function CadWorkspace({
     setMobileLookMenuOpen,
     setSidebarWidth,
     setTabToolsWidth,
-    setUrdfEntryAnimationEnabled,
     setOpenTabs,
     applyTabRecord,
     selectedEntryKeyFromUrl,
@@ -2667,41 +2064,6 @@ export default function CadWorkspace({
     setDxfError,
     setDxfState,
     setDxfStatus
-  ]);
-
-  useEffect(() => {
-    if (!selectedEntry) {
-      cancelUrdfLoad();
-      return;
-    }
-    if (effectiveRenderFormat !== RENDER_FORMAT.URDF) {
-      cancelUrdfLoad();
-      return;
-    }
-    if (!selectedEntryHasUrdf) {
-      cancelUrdfLoad();
-      setUrdfState(null);
-      setUrdfStatus(ASSET_STATUS.PENDING);
-      setUrdfError("");
-      return;
-    }
-    if (selectedUrdfMatches) {
-      return;
-    }
-    loadUrdfForEntry(selectedEntry).catch((err) => {
-      setUrdfStatus(ASSET_STATUS.ERROR);
-      setUrdfError(err instanceof Error ? err.message : String(err));
-    });
-  }, [
-    cancelUrdfLoad,
-    effectiveRenderFormat,
-    loadUrdfForEntry,
-    selectedEntry,
-    selectedEntryHasUrdf,
-    selectedUrdfMatches,
-    setUrdfError,
-    setUrdfState,
-    setUrdfStatus
   ]);
 
   const selectedReferencesMatch =
@@ -3055,14 +2417,6 @@ export default function CadWorkspace({
       };
     }
 
-    if (effectiveRenderFormat === RENDER_FORMAT.URDF && urdfExplorerLoading) {
-      return {
-        loading: true,
-        label: selectedEntryHasUrdf ? (urdfLoadStage || "loading URDF") : "building",
-        title: explorerLoadingLabel
-      };
-    }
-
     if (effectiveRenderFormat === RENDER_FORMAT.STEP && stepUpdateInProgress) {
       return {
         loading: true,
@@ -3132,11 +2486,8 @@ export default function CadWorkspace({
     selectedEntry,
     selectedEntryHasDxf,
     selectedEntryHasMesh,
-    selectedEntryHasUrdf,
     stepUpdateInProgress,
     stepExplorerLoading,
-    urdfLoadStage,
-    urdfExplorerLoading,
     explorerLoadingLabel
   ]);
   const explorerSelectedPartIds = useMemo(() => {
@@ -3175,578 +2526,6 @@ export default function CadWorkspace({
     renderPartIdsForAssemblySelection
   ]);
 
-  const clearUrdfMotionStatusForFile = useCallback((fileRef) => {
-    if (!fileRef) {
-      return;
-    }
-    setUrdfMotionStateByFileRef((current) => {
-      const currentState = current?.[fileRef];
-      if (!currentState?.statusesByEndEffector) {
-        return current;
-      }
-      return {
-        ...current,
-        [fileRef]: {
-          ...currentState,
-          statusesByEndEffector: {}
-        }
-      };
-    });
-  }, []);
-
-  const cancelUrdfTrajectoryPlayback = useCallback(() => {
-    const playback = urdfTrajectoryPlaybackRef.current;
-    playback.token += 1;
-    if (playback.frameId && typeof cancelAnimationFrame === "function") {
-      cancelAnimationFrame(playback.frameId);
-    }
-    playback.frameId = 0;
-  }, []);
-
-  const playUrdfTrajectory = useCallback((fileRef, baseJointValues, trajectory, finalJointValues) => {
-    const normalizedFileRef = String(fileRef || "").trim();
-    if (!normalizedFileRef) {
-      return;
-    }
-    cancelUrdfTrajectoryPlayback();
-    const points = Array.isArray(trajectory?.points) ? trajectory.points : [];
-    const durationSec = points.length
-      ? toFiniteNumber(points[points.length - 1].timeFromStartSec, 0)
-      : 0;
-    if (!points.length || durationSec <= 0 || typeof requestAnimationFrame !== "function") {
-      setJointValuesByFileRef((current) => ({
-        ...current,
-        [normalizedFileRef]: cloneJointValueMap(finalJointValues)
-      }));
-      return;
-    }
-    const playback = urdfTrajectoryPlaybackRef.current;
-    const token = playback.token + 1;
-    playback.token = token;
-    const baseValues = cloneJointValueMap(baseJointValues);
-    const finalValues = cloneJointValueMap(finalJointValues);
-    const startedAtMs = animationNowMs();
-    const step = (timestamp) => {
-      if (urdfTrajectoryPlaybackRef.current.token !== token) {
-        return;
-      }
-      const elapsedSec = Math.max((toFiniteNumber(timestamp, animationNowMs()) - startedAtMs) / 1000, 0);
-      const done = elapsedSec >= durationSec;
-      const nextValues = done
-        ? finalValues
-        : interpolateTrajectoryJointValues(trajectory, elapsedSec, baseValues);
-      setJointValuesByFileRef((current) => ({
-        ...current,
-        [normalizedFileRef]: nextValues
-      }));
-      if (done) {
-        urdfTrajectoryPlaybackRef.current.frameId = 0;
-        return;
-      }
-      urdfTrajectoryPlaybackRef.current.frameId = requestAnimationFrame(step);
-    };
-    playback.frameId = requestAnimationFrame(step);
-  }, [cancelUrdfTrajectoryPlayback]);
-
-  useEffect(() => () => {
-    cancelUrdfTrajectoryPlayback();
-  }, [cancelUrdfTrajectoryPlayback]);
-
-  const syncUrdfMotionTargetToJointValues = useCallback((fileRef, nextJointValues) => {
-    const normalizedFileRef = String(fileRef || "").trim();
-    if (
-      !normalizedFileRef ||
-      !selectedUrdfData ||
-      !selectedUrdfMotionEndEffector ||
-      !selectedUrdfMotionEndEffectorName ||
-      !nextJointValues ||
-      typeof nextJointValues !== "object"
-    ) {
-      return;
-    }
-    const currentPosition = linkOriginInFrame(
-      selectedUrdfData,
-      nextJointValues,
-      selectedUrdfMotionEndEffector.link,
-      selectedUrdfMotionEndEffector.frame
-    );
-    if (!currentPosition) {
-      return;
-    }
-    const normalizedTargetPosition = normalizeMotionTargetPosition(currentPosition);
-    setUrdfMotionStateByFileRef((current) => {
-      const currentState = current?.[normalizedFileRef] && typeof current[normalizedFileRef] === "object"
-        ? current[normalizedFileRef]
-        : {};
-      const targetsByEndEffector = currentState.targetsByEndEffector && typeof currentState.targetsByEndEffector === "object"
-        ? currentState.targetsByEndEffector
-        : {};
-      const statusesByEndEffector = currentState.statusesByEndEffector && typeof currentState.statusesByEndEffector === "object"
-        ? { ...currentState.statusesByEndEffector }
-        : {};
-      delete statusesByEndEffector[selectedUrdfMotionEndEffectorName];
-      return {
-        ...current,
-        [normalizedFileRef]: {
-          ...currentState,
-          targetsByEndEffector: {
-            ...targetsByEndEffector,
-            [selectedUrdfMotionEndEffectorName]: normalizedTargetPosition
-          },
-          statusesByEndEffector
-        }
-      };
-    });
-  }, [
-    selectedUrdfData,
-    selectedUrdfMotionEndEffector,
-    selectedUrdfMotionEndEffectorName
-  ]);
-
-  const handleUrdfJointValueChange = useCallback((joint, nextValueDeg) => {
-    const jointName = String(joint?.name || "").trim();
-    if (!selectedUrdfFileRef || !jointName) {
-      return;
-    }
-    cancelUrdfTrajectoryPlayback();
-    const clampedValueDeg = clampJointValueDeg(joint, nextValueDeg);
-    const nextJointValues = {
-      ...selectedUrdfJointValues,
-      [jointName]: clampedValueDeg
-    };
-    setJointValuesByFileRef((current) => ({
-      ...current,
-      [selectedUrdfFileRef]: nextJointValues
-    }));
-    syncUrdfMotionTargetToJointValues(selectedUrdfFileRef, nextJointValues);
-    clearUrdfMotionStatusForFile(selectedUrdfFileRef);
-  }, [
-    cancelUrdfTrajectoryPlayback,
-    clearUrdfMotionStatusForFile,
-    selectedUrdfFileRef,
-    selectedUrdfJointValues,
-    syncUrdfMotionTargetToJointValues
-  ]);
-  const handleResetUrdfPose = useCallback(() => {
-    if (!selectedUrdfFileRef) {
-      return;
-    }
-    cancelUrdfTrajectoryPlayback();
-    setJointValuesByFileRef((current) => {
-      if (!current?.[selectedUrdfFileRef]) {
-        return current;
-      }
-      const next = { ...current };
-      delete next[selectedUrdfFileRef];
-      return next;
-    });
-    syncUrdfMotionTargetToJointValues(selectedUrdfFileRef, defaultSelectedUrdfJointValues);
-    clearUrdfMotionStatusForFile(selectedUrdfFileRef);
-  }, [
-    cancelUrdfTrajectoryPlayback,
-    clearUrdfMotionStatusForFile,
-    defaultSelectedUrdfJointValues,
-    selectedUrdfFileRef,
-    syncUrdfMotionTargetToJointValues
-  ]);
-  const handleSelectUrdfPose = useCallback((pose) => {
-    if (!selectedUrdfFileRef || !pose?.resolvedJointValues || typeof pose.resolvedJointValues !== "object") {
-      return;
-    }
-    cancelUrdfTrajectoryPlayback();
-    const nextJointValues = cloneJointValueMap(pose.resolvedJointValues);
-    setJointValuesByFileRef((current) => ({
-      ...current,
-      [selectedUrdfFileRef]: nextJointValues
-    }));
-    syncUrdfMotionTargetToJointValues(selectedUrdfFileRef, nextJointValues);
-    clearUrdfMotionStatusForFile(selectedUrdfFileRef);
-  }, [
-    cancelUrdfTrajectoryPlayback,
-    clearUrdfMotionStatusForFile,
-    selectedUrdfFileRef,
-    syncUrdfMotionTargetToJointValues
-  ]);
-  const handleUrdfMotionEndEffectorChange = useCallback((nextName) => {
-    if (!selectedUrdfFileRef) {
-      return;
-    }
-    const normalizedName = String(nextName || "").trim();
-    startTransition(() => {
-      setUrdfMotionStateByFileRef((current) => ({
-        ...current,
-        [selectedUrdfFileRef]: {
-          ...(current?.[selectedUrdfFileRef] && typeof current[selectedUrdfFileRef] === "object"
-            ? current[selectedUrdfFileRef]
-            : {}),
-          activeEndEffectorName: normalizedName
-        }
-      }));
-    });
-  }, [selectedUrdfFileRef]);
-  const handleUrdfMotionTargetPositionChange = useCallback((axisIndex, nextValue) => {
-    if (!selectedUrdfFileRef || !selectedUrdfMotionEndEffectorName) {
-      return;
-    }
-    const index = Number(axisIndex);
-    if (!Number.isInteger(index) || index < 0 || index > 2) {
-      return;
-    }
-    const numericValue = toFiniteNumber(nextValue, selectedUrdfMotionTargetPosition[index] ?? 0);
-    startTransition(() => {
-      setUrdfMotionStateByFileRef((current) => {
-        const currentState = current?.[selectedUrdfFileRef] && typeof current[selectedUrdfFileRef] === "object"
-          ? current[selectedUrdfFileRef]
-          : {};
-        const targetsByEndEffector = currentState.targetsByEndEffector && typeof currentState.targetsByEndEffector === "object"
-          ? currentState.targetsByEndEffector
-          : {};
-        const nextTarget = normalizeMotionTargetPosition(
-          targetsByEndEffector[selectedUrdfMotionEndEffectorName],
-          selectedUrdfMotionTargetPosition
-        );
-        nextTarget[index] = numericValue;
-        const statusesByEndEffector = currentState.statusesByEndEffector && typeof currentState.statusesByEndEffector === "object"
-          ? { ...currentState.statusesByEndEffector }
-          : {};
-        delete statusesByEndEffector[selectedUrdfMotionEndEffectorName];
-        return {
-          ...current,
-          [selectedUrdfFileRef]: {
-            ...currentState,
-            targetsByEndEffector: {
-              ...targetsByEndEffector,
-              [selectedUrdfMotionEndEffectorName]: nextTarget
-            },
-            statusesByEndEffector
-          }
-        };
-      });
-    });
-  }, [selectedUrdfFileRef, selectedUrdfMotionEndEffectorName, selectedUrdfMotionTargetPosition]);
-  const handleUseCurrentUrdfMotionPosition = useCallback(() => {
-    if (!selectedUrdfFileRef || !selectedUrdfMotionEndEffectorName || !selectedUrdfMotionCurrentPosition) {
-      return;
-    }
-    const currentPosition = normalizeMotionTargetPosition(selectedUrdfMotionCurrentPosition);
-    startTransition(() => {
-      setUrdfMotionStateByFileRef((current) => {
-        const currentState = current?.[selectedUrdfFileRef] && typeof current[selectedUrdfFileRef] === "object"
-          ? current[selectedUrdfFileRef]
-          : {};
-        const targetsByEndEffector = currentState.targetsByEndEffector && typeof currentState.targetsByEndEffector === "object"
-          ? currentState.targetsByEndEffector
-          : {};
-        const statusesByEndEffector = currentState.statusesByEndEffector && typeof currentState.statusesByEndEffector === "object"
-          ? { ...currentState.statusesByEndEffector }
-          : {};
-        delete statusesByEndEffector[selectedUrdfMotionEndEffectorName];
-        return {
-          ...current,
-          [selectedUrdfFileRef]: {
-            ...currentState,
-            targetsByEndEffector: {
-              ...targetsByEndEffector,
-              [selectedUrdfMotionEndEffectorName]: currentPosition
-            },
-            statusesByEndEffector
-          }
-        };
-      });
-    });
-  }, [selectedUrdfFileRef, selectedUrdfMotionCurrentPosition, selectedUrdfMotionEndEffectorName]);
-  const handleApplyUrdfMotionTarget = useCallback(async (targetPositionOverride = selectedUrdfMotionTargetPosition) => {
-    if (!selectedUrdfFileRef || !selectedUrdfData || !selectedUrdfMotionEndEffector || !selectedUrdfMotionEndEffectorName) {
-      return;
-    }
-    const targetPosition = normalizeMotionTargetPosition(targetPositionOverride);
-    const showMotionError = (message) => {
-      const nextMessage = String(message || "Motion request failed.");
-      setMotionErrorStatus("");
-      if (typeof window === "undefined") {
-        setMotionErrorStatus(nextMessage);
-        return;
-      }
-      window.setTimeout(() => {
-        setMotionErrorStatus(nextMessage);
-      }, 0);
-    };
-    setMotionErrorStatus("");
-    if (!selectedUrdfMotionControls?.motionServer) {
-      showMotionError("Motion server is not configured for this URDF.");
-      return;
-    }
-    cancelUrdfTrajectoryPlayback();
-    setUrdfMotionStateByFileRef((current) => {
-      const currentState = current?.[selectedUrdfFileRef] && typeof current[selectedUrdfFileRef] === "object"
-        ? current[selectedUrdfFileRef]
-        : {};
-      return {
-        ...current,
-        [selectedUrdfFileRef]: {
-          ...currentState,
-          solvingEndEffectorName: selectedUrdfMotionEndEffectorName
-        }
-      };
-    });
-    try {
-      const payload = await requestMotionServer(selectedUrdfMotionCommand, {
-        dir: catalogRootDir,
-        file: selectedUrdfFileRef,
-        startJointValuesByNameDeg: selectedUrdfJointValues,
-        target: {
-          endEffector: selectedUrdfMotionEndEffectorName,
-          frame: selectedUrdfMotionEndEffector.frame,
-          xyz: targetPosition
-        }
-      });
-      if (payload?.ok === false) {
-        showMotionError(String(payload.message || "Motion server request failed."));
-        return;
-      }
-      const trajectory = payload?.trajectory
-        ? validateUrdfMotionTrajectory(selectedUrdfData, payload.trajectory)
-        : null;
-      const fallbackJointValues = trajectory?.points?.length
-        ? trajectory.points[trajectory.points.length - 1].positionsByNameDeg
-        : null;
-      const returnedJointValues = validateUrdfMotionJointValues(
-        selectedUrdfData,
-        payload?.jointValuesByNameDeg || fallbackJointValues
-      );
-      const nextJointValues = {
-        ...selectedUrdfJointValues,
-        ...returnedJointValues
-      };
-      const measurement = measureUrdfMotionResult(
-        selectedUrdfData,
-        nextJointValues,
-        selectedUrdfMotionEndEffector,
-        targetPosition
-      );
-      const tolerance = toFiniteNumber(selectedUrdfMotionEndEffector.positionTolerance, 0.002);
-      if (trajectory) {
-        playUrdfTrajectory(selectedUrdfFileRef, selectedUrdfJointValues, trajectory, nextJointValues);
-      } else {
-        setJointValuesByFileRef((current) => ({
-          ...current,
-          [selectedUrdfFileRef]: nextJointValues
-        }));
-      }
-      if (measurement.positionError > tolerance) {
-        showMotionError("Motion applied, but FK residual is outside tolerance.");
-      }
-    } catch (error) {
-      showMotionError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setUrdfMotionStateByFileRef((current) => {
-        const currentState = current?.[selectedUrdfFileRef] && typeof current[selectedUrdfFileRef] === "object"
-          ? current[selectedUrdfFileRef]
-          : {};
-        if (currentState.solvingEndEffectorName !== selectedUrdfMotionEndEffectorName) {
-          return current;
-        }
-        const nextState = { ...currentState };
-        delete nextState.solvingEndEffectorName;
-        return {
-          ...current,
-          [selectedUrdfFileRef]: nextState
-        };
-      });
-    }
-  }, [
-    cancelUrdfTrajectoryPlayback,
-    catalogRootDir,
-    playUrdfTrajectory,
-    selectedUrdfData,
-    selectedUrdfFileRef,
-    selectedUrdfMotionControls,
-    selectedUrdfMotionCommand,
-    selectedUrdfMotionEndEffector,
-    selectedUrdfMotionEndEffectorName,
-    selectedUrdfMotionTargetPosition,
-    selectedUrdfJointValues
-  ]);
-  const handleApplyUrdfMotion = useCallback(async () => {
-    await handleApplyUrdfMotionTarget(selectedUrdfMotionTargetPosition);
-  }, [
-    handleApplyUrdfMotionTarget,
-    selectedUrdfMotionTargetPosition
-  ]);
-  const restoreUrdfPosePickerPerspective = useCallback((perspective) => {
-    const restoredPerspective = clonePerspectiveSnapshot(perspective);
-    if (!restoredPerspective) {
-      return false;
-    }
-    explorerRef.current?.setPerspective?.(restoredPerspective, { animate: true });
-    activePerspectiveRef.current = restoredPerspective;
-    setExplorerPerspective(restoredPerspective);
-    return true;
-  }, []);
-  const handleBeginUrdfPosePicker = useCallback(() => {
-    if (!selectedUrdfFileRef || !selectedUrdfMotionControls) {
-      return;
-    }
-    const originalPerspective = clonePerspectiveSnapshot(explorerRef.current?.getPerspective?.() || activePerspectiveRef.current);
-    setUrdfPosePickerState({
-      fileRef: selectedUrdfFileRef,
-      originalPerspective
-    });
-  }, [selectedUrdfFileRef, selectedUrdfMotionControls]);
-  const handleCancelUrdfPosePicker = useCallback(() => {
-    const originalPerspective = urdfPosePickerState.fileRef ? urdfPosePickerState.originalPerspective : null;
-    setUrdfPosePickerState(emptyUrdfPosePickerState());
-    restoreUrdfPosePickerPerspective(originalPerspective);
-  }, [restoreUrdfPosePickerPerspective, urdfPosePickerState.fileRef, urdfPosePickerState.originalPerspective]);
-  const handleToggleUrdfPosePicker = useCallback(() => {
-    if (urdfPosePickerActive) {
-      handleCancelUrdfPosePicker();
-      return;
-    }
-    handleBeginUrdfPosePicker();
-  }, [handleBeginUrdfPosePicker, handleCancelUrdfPosePicker, urdfPosePickerActive]);
-
-  useEffect(() => {
-    if (!urdfPosePickerActive || typeof window === "undefined") {
-      return undefined;
-    }
-    const handleKeyDown = (event) => {
-      if (event.defaultPrevented) {
-        return;
-      }
-      if (event.key !== "Escape" && event.key !== "Esc" && event.code !== "Escape") {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      handleCancelUrdfPosePicker();
-    };
-    window.addEventListener("keydown", handleKeyDown, true);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown, true);
-    };
-  }, [handleCancelUrdfPosePicker, urdfPosePickerActive]);
-
-  const commitUrdfMotionTargetPosition = useCallback((normalizedTargetPosition) => {
-    if (!selectedUrdfFileRef || !selectedUrdfMotionEndEffectorName) {
-      return;
-    }
-    setUrdfMotionStateByFileRef((current) => {
-      const currentState = current?.[selectedUrdfFileRef] && typeof current[selectedUrdfFileRef] === "object"
-        ? current[selectedUrdfFileRef]
-        : {};
-      const targetsByEndEffector = currentState.targetsByEndEffector && typeof currentState.targetsByEndEffector === "object"
-        ? currentState.targetsByEndEffector
-        : {};
-      const statusesByEndEffector = currentState.statusesByEndEffector && typeof currentState.statusesByEndEffector === "object"
-        ? { ...currentState.statusesByEndEffector }
-        : {};
-      delete statusesByEndEffector[selectedUrdfMotionEndEffectorName];
-      return {
-        ...current,
-        [selectedUrdfFileRef]: {
-          ...currentState,
-          targetsByEndEffector: {
-            ...targetsByEndEffector,
-            [selectedUrdfMotionEndEffectorName]: normalizedTargetPosition
-          },
-          statusesByEndEffector
-        }
-      };
-    });
-  }, [selectedUrdfFileRef, selectedUrdfMotionEndEffectorName]);
-  const handleUrdfPosePointPick = useCallback(async ({ point } = {}) => {
-    if (!selectedUrdfFileRef || !selectedUrdfData || !selectedUrdfMotionEndEffector || !selectedUrdfMotionEndEffectorName) {
-      return;
-    }
-    const pickedPoint = normalizePoint3(point);
-    if (!pickedPoint || !selectedUrdfPosePickerState) {
-      return;
-    }
-    const targetPosition = rootPointInFrame(
-      selectedUrdfData,
-      selectedUrdfJointValues,
-      pickedPoint,
-      selectedUrdfMotionEndEffector.frame
-    );
-    if (!targetPosition) {
-      return;
-    }
-    const normalizedTargetPosition = normalizeMotionTargetPosition(targetPosition);
-    const originalPerspective = selectedUrdfPosePickerState.originalPerspective;
-    setUrdfPosePickerState(emptyUrdfPosePickerState());
-    restoreUrdfPosePickerPerspective(originalPerspective);
-    commitUrdfMotionTargetPosition(normalizedTargetPosition);
-    await handleApplyUrdfMotionTarget(normalizedTargetPosition);
-  }, [
-    commitUrdfMotionTargetPosition,
-    handleApplyUrdfMotionTarget,
-    restoreUrdfPosePickerPerspective,
-    selectedUrdfData,
-    selectedUrdfFileRef,
-    selectedUrdfMotionEndEffector,
-    selectedUrdfMotionEndEffectorName,
-    selectedUrdfJointValues,
-    selectedUrdfPosePickerState
-  ]);
-  const handleCopyUrdfJointAngles = useCallback(async () => {
-    setScreenshotStatus("");
-    if (!movableUrdfJoints.length) {
-      setCopyStatus("No movable joints are available");
-      return;
-    }
-    try {
-      await copyTextToClipboard(buildUrdfJointAnglesCopyText(movableUrdfJoints, selectedUrdfJointValues));
-      setCopyStatus("Copied joint angles");
-    } catch (error) {
-      setCopyStatus(error instanceof Error ? error.message : "Clipboard write failed");
-    }
-  }, [movableUrdfJoints, selectedUrdfJointValues]);
-  const handleUrdfIntroAnimationEnabledChange = useCallback((nextEnabled) => {
-    setUrdfEntryAnimationEnabled(normalizeUrdfIntroAnimationEnabled(nextEnabled));
-  }, []);
-  const handleReplayUrdfIntroAnimation = useCallback(() => {
-    if (!selectedUrdfFileRef) {
-      return;
-    }
-    startTransition(() => {
-      setSelectedUrdfIntroReplayToken((current) => current + 1);
-    });
-  }, [selectedUrdfFileRef]);
-  const handleUrdfAnimationSpeedChange = useCallback((nextSpeed) => {
-    if (!selectedUrdfFileRef) {
-      return;
-    }
-    const normalizedSpeed = normalizeUrdfAnimationSpeed(nextSpeed);
-    startTransition(() => {
-      setUrdfAnimationSettingsByFileRef((current) => ({
-        ...current,
-        [selectedUrdfFileRef]: {
-          ...DEFAULT_URDF_ANIMATION_SETTINGS,
-          ...(current?.[selectedUrdfFileRef] && typeof current[selectedUrdfFileRef] === "object"
-            ? current[selectedUrdfFileRef]
-            : {}),
-          speed: normalizedSpeed
-        }
-      }));
-    });
-  }, [selectedUrdfFileRef]);
-
-  useEffect(() => {
-    setSelectedUrdfIntroReplayToken(0);
-  }, [selectedUrdfFileRef]);
-  useEffect(() => {
-    if (urdfPosePickerState.fileRef && urdfPosePickerState.fileRef !== selectedUrdfFileRef) {
-      const originalPerspective = urdfPosePickerState.originalPerspective;
-      setUrdfPosePickerState(emptyUrdfPosePickerState());
-      restoreUrdfPosePickerPerspective(originalPerspective);
-    }
-  }, [
-    restoreUrdfPosePickerPerspective,
-    selectedUrdfFileRef,
-    urdfPosePickerState.fileRef,
-    urdfPosePickerState.originalPerspective
-  ]);
   const copySelectionPayload = useMemo(() => {
     const selectedReferencesForCopy = selectedReferenceIds
       .map((id) => effectiveActiveReferenceMap.get(id))
@@ -4421,7 +3200,6 @@ export default function CadWorkspace({
         <CadRenderPane
           explorerRef={explorerRef}
           renderFormat={effectiveRenderFormat}
-          renderPartsIndividually={isUrdfView}
           selectedMeshData={selectedMeshData}
           selectedDxfData={selectedDxfData}
           selectedDxfMeshData={selectedDxfMeshData}
@@ -4465,17 +3243,6 @@ export default function CadWorkspace({
           copyButtonLabel={copyButtonLabel}
           handleCopySelection={handleCopySelection}
           handleScreenshotCopy={handleScreenshotCopy}
-          partIntroAnimation={isUrdfView ? {
-            enabled: selectedUrdfAnimationSettings.introEnabled,
-            introKey: selectedUrdfAnimationKey,
-            replayToken: selectedUrdfIntroReplayToken
-          } : null}
-          urdfPosePicker={isUrdfView && selectedUrdfMotionControls ? {
-            active: urdfPosePickerActive,
-            center: URDF_POSE_PICKER_DEFAULT_CENTER,
-            onPickPoint: handleUrdfPosePointPick,
-            onCancel: handleCancelUrdfPosePicker
-          } : null}
         />
       </div>
 
@@ -4493,7 +3260,6 @@ export default function CadWorkspace({
         entrySourceFormat={entrySourceFormat}
         entryHasMesh={entryHasMesh}
         entryHasDxf={entryHasDxf}
-        entryHasUrdf={entryHasUrdf}
         onStartResize={handleStartSidebarResize}
       />
 
@@ -4524,9 +3290,6 @@ export default function CadWorkspace({
                 selectionToolActive={selectionToolActive}
                 referenceSelectionPending={referenceSelectionPending}
                 referenceSelectionUnavailable={referenceSelectionUnavailable}
-                urdfPosePickerAvailable={Boolean(selectedUrdfMotionControls)}
-                urdfPosePickerActive={urdfPosePickerActive}
-                handleToggleUrdfPosePicker={handleToggleUrdfPosePicker}
                 drawToolActive={drawToolActive}
                 handleSelectTabToolMode={handleSelectTabToolMode}
                 explorerLoading={explorerLoading}
@@ -4605,43 +3368,6 @@ export default function CadWorkspace({
               />
             ) : null}
 
-            {selectedFileSheetKind === "urdf" ? (
-              <UrdfFileSheet
-                key={`urdf:${selectedKey}`}
-                open={fileSheetOpen}
-                isDesktop={isDesktop}
-                width={activeSheetWidth || tabToolsWidth}
-                onStartResize={handleStartFileSheetResize}
-                joints={movableUrdfJoints}
-                poses={selectedUrdfPoses}
-                activePoseName={activeSelectedUrdfPoseName}
-                jointValues={selectedUrdfJointValues}
-                onJointValueChange={handleUrdfJointValueChange}
-                onPoseSelect={handleSelectUrdfPose}
-                onCopyJointAngles={handleCopyUrdfJointAngles}
-                introAnimationEnabled={selectedUrdfAnimationSettings.introEnabled}
-                animationSpeed={selectedUrdfAnimationSettings.speed}
-                onIntroAnimationEnabledChange={handleUrdfIntroAnimationEnabledChange}
-                onReplayIntroAnimation={handleReplayUrdfIntroAnimation}
-                onAnimationSpeedChange={handleUrdfAnimationSpeedChange}
-                onResetPose={handleResetUrdfPose}
-                motion={selectedUrdfMotionControls ? {
-                  endEffectors: selectedUrdfMotionEndEffectors,
-                  activeEndEffectorName: selectedUrdfMotionEndEffectorName,
-                  targetPosition: selectedUrdfMotionTargetPosition,
-                  currentPosition: selectedUrdfMotionCurrentPosition,
-                  solving: selectedUrdfMotionSolving,
-                  selectPoseActive: urdfPosePickerActive,
-                  onEndEffectorChange: handleUrdfMotionEndEffectorChange,
-                  onTargetPositionChange: handleUrdfMotionTargetPositionChange,
-                  onUseCurrentPosition: handleUseCurrentUrdfMotionPosition,
-                  onApply: handleApplyUrdfMotion,
-                  onSelectPose: handleToggleUrdfPosePicker,
-                  onCancelSelectPose: handleCancelUrdfPosePicker
-                } : null}
-              />
-            ) : null}
-
             <LookSettingsPopover
               open={lookSheetOpen}
               isDesktop={isDesktop}
@@ -4660,13 +3386,11 @@ export default function CadWorkspace({
           copyStatus={copyStatus}
           screenshotStatus={screenshotStatus}
           persistenceStatus={persistenceStatus}
-          motionErrorStatus={motionErrorStatus}
           previewMode={previewMode}
           onClear={() => {
             setCopyStatus("");
             setScreenshotStatus("");
             setPersistenceStatus("");
-            setMotionErrorStatus("");
             lastPersistenceFailureKeyRef.current = "";
           }}
         />

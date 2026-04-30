@@ -9,22 +9,18 @@ If you are modifying CAD Explorer itself, go to `.agents/skills/cad/explorer/REA
 Use the bundled skills for workflow details:
 
 - `.agents/skills/cad/SKILL.md` for STEP, STL, 3MF, DXF, GLB/topology artifacts, snapshots, and `@cad[...]` prompt references.
-- `.agents/skills/urdf/SKILL.md` for generated URDF files, `gen_urdf()`, robot links, joints, limits, and URDF mesh references.
-- `.agents/skills/robot-motion/SKILL.md` for ROS 2/MoveIt dependency setup, running the motion server, and generating IK/path-planning artifacts for an existing URDF.
 
-Use the URDF skill when generating or editing a robot description. If an existing valid URDF already exists, the robot-motion skill can attach motion artifacts to it directly; use robot-motion for inverse kinematics, path planning, motion artifact generation, and motion-server testing.
-
-`AGENTS.md` is intentionally harness-focused. Reusable CAD, URDF, robot-motion, and vendor-preflight workflow rules live inside the skills.
+`AGENTS.md` is intentionally harness-focused. Reusable CAD workflow rules live inside the skill.
 
 ## Harness Context
 
 Project CAD files are repo-relative. This harness does not reserve a
-project-file directory; the current robot-arm project keeps generated and source
-CAD entries at the repository root under folders such as `STEP/`, `STL/`,
-`DXF/`, and `3MF/`.
+project-file directory; current projects keep generated and source CAD entries
+at the repository root under folders such as `STEP/`, `STL/`, `DXF/`, and
+`3MF/`.
 
-The CAD and URDF skill tools are file-targeted. They do not depend on a harness
-layout or prepend a project root.
+The CAD skill tools are file-targeted. They do not depend on a harness layout
+or prepend a project root.
 
 Project-specific context may live in compact root-level notes such as
 `PROJECT.md`. Do not copy reusable generator contracts, prompt-ref rules,
@@ -55,7 +51,7 @@ Other bundled skills own their Python dependencies in their skill directories; i
 
 ## Source Of Truth
 
-- Generated CAD and URDF outputs are derived artifacts.
+- Generated CAD outputs are derived artifacts.
 - Package-local render, topology, component, and review-image artifacts are derived artifacts.
 - Do not hand-edit generated artifacts unless explicitly instructed. Edit the owning source file or imported source file first, then regenerate explicit targets with the relevant skill tool.
 - If regenerated output differs from checked-in generated files, the regenerated output is authoritative.

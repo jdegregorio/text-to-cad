@@ -7,14 +7,12 @@ import {
   loadRenderJson,
   loadRenderSelectorBundle,
   loadRenderStl,
-  loadRenderUrdf,
   peekRender3Mf,
   peekRenderDxf,
   peekRenderGlb,
   peekRenderJson,
   peekRenderSelectorBundle,
-  peekRenderStl,
-  peekRenderUrdf
+  peekRenderStl
 } from "../../../lib/renderAssetClient";
 import {
   assemblyCompositionMeshRequests,
@@ -31,15 +29,6 @@ function abortLoad(controllerRef) {
   controllerRef.current = null;
 }
 
-function urdfMeshUrls(urdfData) {
-  return [...new Set(
-    (Array.isArray(urdfData?.links) ? urdfData.links : [])
-      .flatMap((link) => Array.isArray(link?.visuals) ? link.visuals : [])
-      .map((visual) => String(visual?.meshUrl || "").trim())
-      .filter(Boolean)
-  )];
-}
-
 function entryAsset(entry, key) {
   return entry?.assets?.[key] || null;
 }
@@ -50,14 +39,6 @@ function entryAssetUrl(entry, key) {
 
 function entryAssetHash(entry, key) {
   return String(entryAsset(entry, key)?.hash || "").trim();
-}
-
-function entryUrdfAssetHash(entry) {
-  return [
-    entryAssetHash(entry, "urdf"),
-    entryAssetHash(entry, "explorerMetadata"),
-    entryAssetHash(entry, "motionExplorerMetadata")
-  ].filter(Boolean).join(":");
 }
 
 function entryMeshAssetKey(entry) {
@@ -131,10 +112,6 @@ export function useCadAssets({
   const [dxfStatus, setDxfStatus] = useState(ASSET_STATUS.PENDING);
   const [dxfError, setDxfError] = useState("");
   const [dxfLoadStage, setDxfLoadStage] = useState("");
-  const [urdfState, setUrdfState] = useState(null);
-  const [urdfStatus, setUrdfStatus] = useState(ASSET_STATUS.PENDING);
-  const [urdfError, setUrdfError] = useState("");
-  const [urdfLoadStage, setUrdfLoadStage] = useState("");
   const [referenceState, setReferenceState] = useState(null);
   const [referenceStatus, setReferenceStatus] = useState(REFERENCE_STATUS.IDLE);
   const [referenceError, setReferenceError] = useState("");
@@ -142,11 +119,9 @@ export function useCadAssets({
 
   const requestIdRef = useRef(0);
   const dxfRequestIdRef = useRef(0);
-  const urdfRequestIdRef = useRef(0);
   const referenceRequestIdRef = useRef(0);
   const meshAbortControllerRef = useRef(null);
   const dxfAbortControllerRef = useRef(null);
-  const urdfAbortControllerRef = useRef(null);
   const referenceAbortControllerRef = useRef(null);
 
   const getAssemblyMeshHash = useCallback((entry) => {
@@ -242,32 +217,6 @@ export function useCadAssets({
     };
   }, [entryHasDxf]);
 
-  const getCachedUrdfState = useCallback((entry) => {
-    if (entry?.kind !== "urdf" || !entryAssetUrl(entry, "urdf")) {
-      return null;
-    }
-    const urdfData = peekRenderUrdf(entryAssetUrl(entry, "urdf"), {
-      explorerMetadataUrl: entryAssetUrl(entry, "explorerMetadata"),
-      motionExplorerMetadataUrl: entryAssetUrl(entry, "motionExplorerMetadata")
-    });
-    if (!urdfData) {
-      return null;
-    }
-    const meshUrls = urdfMeshUrls(urdfData);
-    const meshes = meshUrls.map((meshUrl) => peekRenderStl(meshUrl)).filter(Boolean);
-    if (meshes.length !== meshUrls.length) {
-      return null;
-    }
-    const meshesByUrl = new Map(meshUrls.map((meshUrl, index) => [meshUrl, meshes[index]]));
-    return {
-      file: entry.file,
-      kind: entry.kind,
-      urdfHash: entryUrdfAssetHash(entry),
-      urdfData,
-      meshesByUrl
-    };
-  }, []);
-
   const cancelMeshLoad = useCallback(() => {
     requestIdRef.current += 1;
     abortLoad(meshAbortControllerRef);
@@ -280,12 +229,6 @@ export function useCadAssets({
     dxfRequestIdRef.current += 1;
     abortLoad(dxfAbortControllerRef);
     setDxfLoadStage("");
-  }, []);
-
-  const cancelUrdfLoad = useCallback(() => {
-    urdfRequestIdRef.current += 1;
-    abortLoad(urdfAbortControllerRef);
-    setUrdfLoadStage("");
   }, []);
 
   const cancelReferenceLoad = useCallback(() => {
@@ -529,75 +472,9 @@ export function useCadAssets({
     }
   }, [cancelDxfLoad, entryHasDxf, getCachedDxfState]);
 
-  const loadUrdfForEntry = useCallback(async (entry) => {
-    cancelUrdfLoad();
-    const requestId = urdfRequestIdRef.current;
-
-    if (entry?.kind !== "urdf" || !entryAssetUrl(entry, "urdf")) {
-      setUrdfState(null);
-      setUrdfStatus(ASSET_STATUS.PENDING);
-      setUrdfError("");
-      return;
-    }
-
-    const cachedUrdfState = getCachedUrdfState(entry);
-    if (cachedUrdfState) {
-      setUrdfState(cachedUrdfState);
-      setUrdfStatus(ASSET_STATUS.READY);
-      setUrdfError("");
-      return;
-    }
-
-    const controller = new AbortController();
-    urdfAbortControllerRef.current = controller;
-    setUrdfStatus(ASSET_STATUS.LOADING);
-    setUrdfError("");
-    setUrdfLoadStage("loading URDF");
-
-    try {
-      const urdfData = await loadRenderUrdf(entryAssetUrl(entry, "urdf"), {
-        signal: controller.signal,
-        explorerMetadataUrl: entryAssetUrl(entry, "explorerMetadata"),
-        motionExplorerMetadataUrl: entryAssetUrl(entry, "motionExplorerMetadata")
-      });
-      const meshUrls = urdfMeshUrls(urdfData);
-      setUrdfLoadStage(meshUrls.length ? "loading meshes" : "building robot");
-      const meshes = await Promise.all(
-        meshUrls.map((meshUrl) => loadRenderStl(meshUrl, { signal: controller.signal }))
-      );
-      if (requestId !== urdfRequestIdRef.current) {
-        return;
-      }
-      setUrdfLoadStage("building robot");
-      const meshesByUrl = new Map(meshUrls.map((meshUrl, index) => [meshUrl, meshes[index]]));
-      setUrdfState({
-        file: entry.file,
-        kind: entry.kind,
-        urdfHash: entryUrdfAssetHash(entry),
-        urdfData,
-        meshesByUrl
-      });
-      setUrdfStatus(ASSET_STATUS.READY);
-    } catch (err) {
-      if (requestId !== urdfRequestIdRef.current || isAbortError(err) || controller.signal.aborted) {
-        return;
-      }
-      setUrdfStatus(ASSET_STATUS.ERROR);
-      setUrdfError(err instanceof Error ? err.message : String(err));
-    } finally {
-      if (urdfAbortControllerRef.current === controller) {
-        urdfAbortControllerRef.current = null;
-      }
-      if (requestId === urdfRequestIdRef.current) {
-        setUrdfLoadStage("");
-      }
-    }
-  }, [cancelUrdfLoad, getCachedUrdfState]);
-
   useEffect(() => () => {
     abortLoad(meshAbortControllerRef);
     abortLoad(dxfAbortControllerRef);
-    abortLoad(urdfAbortControllerRef);
     abortLoad(referenceAbortControllerRef);
   }, []);
 
@@ -618,13 +495,6 @@ export function useCadAssets({
     dxfError,
     setDxfError,
     dxfLoadStage,
-    urdfState,
-    setUrdfState,
-    urdfStatus,
-    setUrdfStatus,
-    urdfError,
-    setUrdfError,
-    urdfLoadStage,
     referenceState,
     setReferenceState,
     referenceStatus,
@@ -635,14 +505,11 @@ export function useCadAssets({
     getCachedMeshState,
     getCachedReferenceState,
     getCachedDxfState,
-    getCachedUrdfState,
     cancelMeshLoad,
     cancelDxfLoad,
-    cancelUrdfLoad,
     cancelReferenceLoad,
     loadMeshForEntry,
     loadDxfForEntry,
-    loadUrdfForEntry,
     loadReferencesForEntry
   };
 }

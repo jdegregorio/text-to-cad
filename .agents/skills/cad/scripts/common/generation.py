@@ -83,7 +83,6 @@ class EntrySpec:
     script_path: Path | None = None
     generator_metadata: GeneratorMetadata | None = None
     dxf_path: Path | None = None
-    urdf_path: Path | None = None
     stl_path: Path | None = None
     three_mf_path: Path | None = None
     export_stl: bool = False
@@ -195,7 +194,6 @@ def _entry_spec_from_source(source: CadSource) -> EntrySpec:
         glb_angular_tolerance=source.glb_angular_tolerance,
     )
     display_path = step_path if step_path is not None else source.source_path
-    urdf_path = source.urdf_path
 
     return EntrySpec(
         source_ref=source.source_ref,
@@ -212,7 +210,6 @@ def _entry_spec_from_source(source: CadSource) -> EntrySpec:
         script_path=script_path,
         generator_metadata=generator_metadata,
         dxf_path=source.dxf_path,
-        urdf_path=urdf_path,
         stl_path=source.stl_path,
         three_mf_path=source.three_mf_path,
         export_stl=source.export_stl,
@@ -226,17 +223,6 @@ def _entry_spec_from_source(source: CadSource) -> EntrySpec:
         color=source.color,
         skip_topology=source.skip_topology,
     )
-
-
-def _read_optional_urdf_source(urdf_path: Path) -> object | None:
-    if not urdf_path.exists():
-        return None
-    from urdf_source import UrdfSourceError, read_urdf_source
-
-    try:
-        return read_urdf_source(urdf_path)
-    except (UrdfSourceError, ValueError):
-        return None
 
 
 def _validate_part_render_output_paths(specs: Sequence[EntrySpec]) -> None:
@@ -432,36 +418,6 @@ def _write_dxf_payload(envelope: dict[str, object], *, output_path: Path, script
     print(f"Wrote DXF: {output_path}")
 
 
-def _write_urdf_payload(envelope: dict[str, object], *, output_path: Path, script_path: Path) -> None:
-    xml = envelope.get("xml")
-    if not isinstance(xml, str):
-        raise TypeError(
-            f"{_display_path(script_path)} gen_urdf() envelope field 'xml' must be a string, "
-            f"got {type(xml).__name__}"
-        )
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    text = xml if xml.endswith("\n") else xml + "\n"
-    output_path.write_text(text, encoding="utf-8")
-    print(f"Wrote URDF: {output_path}")
-    _write_urdf_explorer_metadata_payload(envelope, output_path=output_path, script_path=script_path)
-
-
-def _write_urdf_explorer_metadata_payload(envelope: dict[str, object], *, output_path: Path, script_path: Path) -> None:
-    if "explorer_metadata" not in envelope or envelope.get("explorer_metadata") is None:
-        return
-    explorer_metadata = envelope.get("explorer_metadata")
-    if not isinstance(explorer_metadata, dict):
-        raise TypeError(
-            f"{_display_path(script_path)} gen_urdf() envelope field 'explorer_metadata' must be an object, "
-            f"got {type(explorer_metadata).__name__}"
-        )
-    explorer_dir = output_path.parent / f".{output_path.name}"
-    explorer_dir.mkdir(parents=True, exist_ok=True)
-    explorer_metadata_path = explorer_dir / "explorer.json"
-    explorer_metadata_path.write_text(json.dumps(explorer_metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"Wrote URDF explorer metadata: {explorer_metadata_path}")
-
-
 def run_script_generator(spec: EntrySpec, generator_name: str) -> None:
     if spec.script_path is None or spec.generator_metadata is None:
         raise ValueError(f"{spec.source_ref} is not a generated Python CAD source")
@@ -502,17 +458,6 @@ def run_script_generator(spec: EntrySpec, generator_name: str) -> None:
         if spec.dxf_path is None:
             raise RuntimeError(f"{spec.source_ref} has no configured DXF output")
         _write_dxf_payload(envelope, output_path=spec.dxf_path, script_path=spec.script_path)
-    elif generator_name == "gen_urdf":
-        _assert_runtime_output_matches_metadata(
-            envelope,
-            script_path=spec.script_path,
-            generator_name=generator_name,
-            field_name="urdf_output",
-            expected=spec.generator_metadata.urdf_output,
-        )
-        if spec.urdf_path is None:
-            raise RuntimeError(f"{spec.source_ref} has no configured URDF output")
-        _write_urdf_payload(envelope, output_path=spec.urdf_path, script_path=spec.script_path)
     else:
         raise RuntimeError(f"Unsupported generator: {generator_name}")
 
@@ -524,11 +469,6 @@ def run_script_generator(spec: EntrySpec, generator_name: str) -> None:
         raise RuntimeError(
             f"{_display_path(spec.script_path)} did not write {_display_path(spec.dxf_path)}"
         )
-    if generator_name == "gen_urdf" and spec.urdf_path is not None and not spec.urdf_path.exists():
-        raise RuntimeError(
-            f"{_display_path(spec.script_path)} did not write {_display_path(spec.urdf_path)}"
-        )
-
 
 def run_generator(spec: EntrySpec) -> None:
     run_script_generator(spec, "gen_step")
@@ -616,8 +556,8 @@ def _script_step_material_colors(spec: EntrySpec) -> dict[str, ColorRGBA]:
         module = _load_generator_module(spec.script_path)
     except Exception:
         return {}
-    raw_materials = getattr(module, "URDF_MATERIALS", {})
-    raw_step_materials = getattr(module, "URDF_STEP_MATERIALS", {})
+    raw_materials = getattr(module, "CAD_MATERIALS", {})
+    raw_step_materials = getattr(module, "CAD_STEP_MATERIALS", {})
     if not isinstance(raw_materials, Mapping) or not isinstance(raw_step_materials, Mapping):
         return {}
     colors: dict[str, ColorRGBA] = {}
@@ -626,7 +566,7 @@ def _script_step_material_colors(spec: EntrySpec) -> dict[str, ColorRGBA]:
             continue
         raw_color = raw_materials.get(raw_material_name)
         try:
-            color = normalize_step_color(raw_color, base_path=spec.source_path, field_name=f"URDF_MATERIALS.{raw_material_name}")
+            color = normalize_step_color(raw_color, base_path=spec.source_path, field_name=f"CAD_MATERIALS.{raw_material_name}")
         except Exception:
             color = None
         if color is not None:
@@ -878,20 +818,6 @@ def _print_dxf_summaries(specs: Sequence[EntrySpec]) -> None:
             )
 
 
-def _print_urdf_summaries(specs: Sequence[EntrySpec]) -> None:
-    for spec in specs:
-        if spec.urdf_path is not None and spec.urdf_path.exists():
-            urdf_source = _read_optional_urdf_source(spec.urdf_path)
-            if urdf_source is None:
-                print(f"summary {spec.source_ref}.urdf: unavailable (invalid urdf)")
-                continue
-            print(
-                "summary "
-                f"{_display_path(spec.urdf_path)}: robot={urdf_source.robot_name} "
-                f"links={len(urdf_source.links)} joints={len(urdf_source.joints)}"
-            )
-
-
 def _selected_specs_for_targets(
     targets: Sequence[str],
     *,
@@ -1004,12 +930,10 @@ def _validate_sidecar_target(spec: EntrySpec, *, generator_name: str, output_nam
         raise ValueError(f"{tool_name} expected a generated Python source target: {spec.source_ref}")
     has_generator = {
         "gen_dxf": metadata.has_gen_dxf,
-        "gen_urdf": metadata.has_gen_urdf,
     }.get(generator_name, False)
     if not has_generator:
         raise ValueError(f"{tool_name} target does not define {generator_name}() envelope: {spec.source_ref}")
-    output_path = spec.dxf_path if generator_name == "gen_dxf" else spec.urdf_path
-    if output_path is None:
+    if spec.dxf_path is None:
         raise ValueError(f"{tool_name} target has no configured {output_name}: {spec.source_ref}")
 
 
@@ -1084,19 +1008,6 @@ def generate_dxf_targets(targets: Sequence[str], *, summary: bool = False) -> in
     )
     if summary:
         _print_dxf_summaries(_refreshed_selected_specs(selected_specs))
-    return 0
-
-
-def generate_urdf_targets(targets: Sequence[str], *, summary: bool = False) -> int:
-    _, selected_specs = _selected_specs_for_targets(targets)
-    for spec in selected_specs:
-        _validate_sidecar_target(spec, generator_name="gen_urdf", output_name="URDF output", tool_name="gen_urdf")
-    _run_selected_specs(
-        selected_specs,
-        action=lambda spec: run_script_generator(spec, "gen_urdf"),
-    )
-    if summary:
-        _print_urdf_summaries(_refreshed_selected_specs(selected_specs))
     return 0
 
 
@@ -1270,13 +1181,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "The shared generator entrypoint has been removed. Use gen_step_part, "
-            "gen_step_assembly, gen_dxf, or gen_urdf with explicit targets."
+            "gen_step_assembly, or gen_dxf with explicit targets."
         )
     )
     parser.parse_args(list(argv) if argv is not None else None)
     parser.error(
         "common is a library, not a generator CLI. "
-        "Run gen_step_part, gen_step_assembly, gen_dxf, or gen_urdf."
+        "Run gen_step_part, gen_step_assembly, or gen_dxf."
     )
     return 2
 

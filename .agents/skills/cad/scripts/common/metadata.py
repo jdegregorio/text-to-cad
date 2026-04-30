@@ -30,12 +30,10 @@ class GeneratorMetadata:
     generator_names: tuple[str, ...]
     has_gen_step: bool
     has_gen_dxf: bool
-    has_gen_urdf: bool
     step_output: str | None
     stl_output: str | None
     three_mf_output: str | None
     dxf_output: str | None
-    urdf_output: str | None
     export_stl: bool
     export_3mf: bool
     stl_tolerance: float | None
@@ -81,7 +79,6 @@ STEP_ENVELOPE_FIELDS = {
     "skip_topology",
 }
 DXF_ENVELOPE_FIELDS = {"document", "dxf_output"}
-URDF_ENVELOPE_FIELDS = {"xml", "urdf_output", "explorer_metadata"}
 
 
 DEFAULT_STL_SETTINGS = MeshSettings(
@@ -204,10 +201,8 @@ def parse_generator_metadata(script_path: Path) -> GeneratorMetadata | None:
     kind: str | None = None
     has_gen_step = False
     has_gen_dxf = False
-    has_gen_urdf = False
     generator_names: list[str] = []
     dxf_output: str | None = None
-    urdf_output: str | None = None
     step_metadata = StepEnvelopeMetadata(
         step_output=None,
         stl_output=None,
@@ -236,7 +231,7 @@ def parse_generator_metadata(script_path: Path) -> GeneratorMetadata | None:
             if target.id == "DISPLAY_NAME" and isinstance(value, ast.Constant) and isinstance(value.value, str):
                 display_name = value.value.strip()
 
-        if not isinstance(node, ast.FunctionDef) or node.name not in {"gen_step", "gen_dxf", "gen_urdf"}:
+        if not isinstance(node, ast.FunctionDef) or node.name not in {"gen_step", "gen_dxf"}:
             continue
         generator_names.append(node.name)
 
@@ -267,18 +262,12 @@ def parse_generator_metadata(script_path: Path) -> GeneratorMetadata | None:
                 function=node,
             )
             has_gen_dxf = True
-        else:
-            urdf_output = _parse_urdf_envelope_metadata(
-                script_path=script_path,
-                function=node,
-            )
-            has_gen_urdf = True
 
-    if not has_gen_step and not has_gen_dxf and not has_gen_urdf:
+    if not has_gen_step and not has_gen_dxf:
         return None
     if not has_gen_step:
         raise ValueError(
-            f"{script_path.relative_to(REPO_ROOT)} gen_dxf() and gen_urdf() require a gen_step() envelope entry"
+            f"{script_path.relative_to(REPO_ROOT)} gen_dxf() requires a gen_step() envelope entry"
         )
 
     return GeneratorMetadata(
@@ -288,12 +277,10 @@ def parse_generator_metadata(script_path: Path) -> GeneratorMetadata | None:
         generator_names=tuple(generator_names),
         has_gen_step=has_gen_step,
         has_gen_dxf=has_gen_dxf,
-        has_gen_urdf=has_gen_urdf,
         step_output=step_metadata.step_output,
         stl_output=step_metadata.stl_output,
         three_mf_output=step_metadata.three_mf_output,
         dxf_output=dxf_output,
-        urdf_output=urdf_output,
         export_stl=step_metadata.export_stl,
         export_3mf=step_metadata.export_3mf,
         stl_tolerance=step_metadata.stl_tolerance,
@@ -431,28 +418,6 @@ def _parse_dxf_envelope_metadata(
         function_name=function.name,
         envelope=envelope,
         field_name="dxf_output",
-    )
-
-
-def _parse_urdf_envelope_metadata(
-    *,
-    script_path: Path,
-    function: ast.FunctionDef,
-) -> str | None:
-    envelope = _parse_literal_return_envelope(script_path=script_path, function=function)
-    _reject_unsupported_fields(
-        script_path=script_path,
-        function_name=function.name,
-        envelope=envelope,
-        allowed_fields=URDF_ENVELOPE_FIELDS,
-    )
-    if "xml" not in envelope:
-        raise ValueError(f"{script_path.relative_to(REPO_ROOT)} gen_urdf() envelope must define 'xml'")
-    return _parse_path_field(
-        script_path=script_path,
-        function_name=function.name,
-        envelope=envelope,
-        field_name="urdf_output",
     )
 
 

@@ -3,7 +3,7 @@ import path from "node:path";
 
 export const DEFAULT_EXPLORER_ROOT_DIR = "";
 
-const SOURCE_EXTENSIONS = new Set([".step", ".stp", ".stl", ".3mf", ".dxf", ".urdf"]);
+const SOURCE_EXTENSIONS = new Set([".step", ".stp", ".stl", ".3mf", ".dxf"]);
 export const EXPLORER_SKIPPED_DIRECTORIES = new Set([
   ".agents",
   ".cache",
@@ -19,8 +19,6 @@ export const EXPLORER_SKIPPED_DIRECTORIES = new Set([
   "viewer",
 ]);
 const EXPLORER_ARTIFACT_FILENAMES = new Set(["model.glb", "topology.json", "topology.bin"]);
-const URDF_EXPLORER_METADATA_FILENAME = "explorer.json";
-const URDF_ROBOT_MOTION_DIRECTORY = "robot-motion";
 
 function toPosixPath(value) {
   return String(value || "").split(path.sep).join("/");
@@ -123,11 +121,6 @@ function isPerStepExplorerDirectoryName(name) {
   return normalized.startsWith(".") && (normalized.endsWith(".step") || normalized.endsWith(".stp"));
 }
 
-function isPerUrdfExplorerDirectoryName(name) {
-  const normalized = String(name || "").toLowerCase();
-  return normalized.startsWith(".") && normalized.endsWith(".urdf");
-}
-
 function isHiddenDirectoryName(name) {
   return String(name || "").startsWith(".");
 }
@@ -136,12 +129,6 @@ function isPathInsidePerStepExplorerDirectory(filePath) {
   return String(filePath || "")
     .split(path.sep)
     .some((part) => isPerStepExplorerDirectoryName(part));
-}
-
-function isPathInsidePerUrdfExplorerDirectory(filePath) {
-  return String(filePath || "")
-    .split(path.sep)
-    .some((part) => isPerUrdfExplorerDirectoryName(part));
 }
 
 function fileRefForSource(rootPath, sourcePath) {
@@ -194,19 +181,6 @@ function createSingleAssetEntry({ repoRoot, rootPath, sourcePath, extension }) {
   const kind = sourceFormatFromExtension(extension);
   const asset = assetForPath(repoRoot, sourcePath);
   const assets = asset ? { [kind]: asset } : {};
-  if (kind === "urdf") {
-    const explorerDir = path.join(path.dirname(sourcePath), `.${path.basename(sourcePath)}`);
-    const explorerMetadataPath = path.join(explorerDir, URDF_EXPLORER_METADATA_FILENAME);
-    const explorerMetadataAsset = assetForPath(repoRoot, explorerMetadataPath);
-    if (explorerMetadataAsset) {
-      assets.explorerMetadata = explorerMetadataAsset;
-    }
-    const motionExplorerMetadataPath = path.join(explorerDir, URDF_ROBOT_MOTION_DIRECTORY, URDF_EXPLORER_METADATA_FILENAME);
-    const motionExplorerMetadataAsset = assetForPath(repoRoot, motionExplorerMetadataPath);
-    if (motionExplorerMetadataAsset) {
-      assets.motionExplorerMetadata = motionExplorerMetadataAsset;
-    }
-  }
   return {
     file: fileRefForSource(rootPath, sourcePath),
     kind,
@@ -221,7 +195,7 @@ function createSingleAssetEntry({ repoRoot, rootPath, sourcePath, extension }) {
 }
 
 function shouldSkipDirectory(name) {
-  return EXPLORER_SKIPPED_DIRECTORIES.has(name) || isHiddenDirectoryName(name) || isPerStepExplorerDirectoryName(name) || isPerUrdfExplorerDirectoryName(name);
+  return EXPLORER_SKIPPED_DIRECTORIES.has(name) || isHiddenDirectoryName(name) || isPerStepExplorerDirectoryName(name);
 }
 
 function collectCadSourceFiles(rootPath, result = []) {
@@ -298,9 +272,6 @@ export function isServedCadAsset(filePath) {
   const extension = path.extname(filePath).toLowerCase();
   if (isPathInsidePerStepExplorerDirectory(filePath)) {
     return extension === ".glb" || EXPLORER_ARTIFACT_FILENAMES.has(path.basename(filePath));
-  }
-  if (isPathInsidePerUrdfExplorerDirectory(filePath)) {
-    return path.basename(filePath) === URDF_EXPLORER_METADATA_FILENAME;
   }
   if (SOURCE_EXTENSIONS.has(extension)) {
     return true;

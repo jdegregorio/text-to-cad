@@ -270,9 +270,6 @@ const TAB_STATE_SCHEMA = [
       if (normalized === RENDER_FORMAT.THREE_MF) {
         return RENDER_FORMAT.THREE_MF;
       }
-      if (normalized === RENDER_FORMAT.URDF) {
-        return RENDER_FORMAT.URDF;
-      }
       return RENDER_FORMAT.STEP;
     }
   },
@@ -409,11 +406,6 @@ const GLOBAL_STATE_SCHEMA = [
     key: "tabToolsWidth",
     defaultValue: CAD_WORKSPACE_DEFAULT_TAB_TOOLS_WIDTH,
     normalize: (value) => normalizePanelWidth(value, CAD_WORKSPACE_DEFAULT_TAB_TOOLS_WIDTH)
-  },
-  {
-    key: "urdfEntryAnimationEnabled",
-    defaultValue: false,
-    normalize: (value) => normalizeBoolean(value, false)
   }
 ];
 
@@ -830,8 +822,7 @@ export function buildCadWorkspaceSessionState(source = {}, { validEntryKeys, loc
     mobileLookSheetOpen: globalState.mobileLookSheetOpen,
     sidebarOpen: globalState.desktopSidebarOpen,
     sidebarWidth: globalState.sidebarWidth,
-    tabToolsWidth: globalState.tabToolsWidth,
-    urdfEntryAnimationEnabled: globalState.urdfEntryAnimationEnabled
+    tabToolsWidth: globalState.tabToolsWidth
   };
 }
 

@@ -28,4 +28,4 @@ Direct STEP/STP targets may use:
 - `--color`
 - `--skip-topology`
 
-This tool does not generate directories and does not run `gen_dxf()` or `gen_urdf()`.
+This tool does not generate directories and does not run `gen_dxf()`.
