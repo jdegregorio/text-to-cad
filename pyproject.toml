@@ -4,11 +4,13 @@ version = "0.1.0"
 description = "A script-driven CAD generation harness for coding agents."
 requires-python = ">=3.11"
 dependencies = [
+  "bd-warehouse>=0.2.0",
   "build123d",
   "ezdxf",
   "lxml",
   "networkx",
   "numpy",
+  "py_gearworks @ git+https://github.com/GarryBGoode/py_gearworks",
   "trimesh",
   "vtk",
 ]

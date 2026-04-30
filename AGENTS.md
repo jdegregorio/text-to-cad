@@ -46,8 +46,11 @@ uv run python
 ```
 
 The synchronized `.venv` has the CAD dependencies required by the skill tools,
-including `build123d` and `OCP`. Direct `./.venv/bin/python` usage is acceptable
-when a tool specifically needs the interpreter path.
+including `build123d`, `bd_warehouse`, `py_gearworks`, and `OCP`. Use
+`bd_warehouse` for standard mechanical parts and hardware features, and use
+`py_gearworks` for generated gear geometry and gear-pair layout. Direct
+`./.venv/bin/python` usage is acceptable when a tool specifically needs the
+interpreter path.
 
 Other bundled skills own their Python dependencies in their skill directories; install them only when using those workflows.
 
