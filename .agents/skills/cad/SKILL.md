@@ -49,7 +49,7 @@ Let generation tools own CAD Explorer-consumed render, topology, metadata, and s
 
 ## Commands
 
-Run with the Python environment for the project or workspace. If the environment lacks the CAD runtime packages, install this skill's script dependencies from `requirements.txt`. Invoke tools as filesystem scripts, for example `python <cad-skill>/scripts/gen_step_part/cli.py ...`. Relative target paths are resolved from the current working directory; the tools do not prepend a harness root.
+Run with the Python environment for the project or workspace. Prefer `uv run python` in uv-managed projects, including the text-to-cad harness after `uv sync`. If the environment lacks the CAD runtime packages, install this skill's script dependencies with `uv pip install -r requirements.txt` from a local virtual environment. Invoke tools as filesystem scripts, for example `uv run python <cad-skill>/scripts/gen_step_part/cli.py ...`. Relative target paths are resolved from the current working directory; the tools do not prepend a harness root.
 
 - Part STEP/render/topology: `scripts/gen_step_part/cli.py`
 - Assembly STEP/render/topology: `scripts/gen_step_assembly/cli.py`

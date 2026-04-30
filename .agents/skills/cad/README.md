@@ -43,12 +43,18 @@ The demo GIF is tracked with Git LFS but skipped by default so normal clones sta
 git lfs pull --include="assets/*.gif" --exclude=""
 ```
 
-Install Python CAD dependencies:
+In the text-to-cad harness, install Python CAD dependencies with `uv` from the
+repo root:
 
 ```bash
-python3.11 -m venv .venv
-./.venv/bin/python -m pip install --upgrade pip
-./.venv/bin/pip install -r .agents/skills/cad/requirements.txt
+uv sync
+```
+
+In a standalone skill checkout, create the same local environment with:
+
+```bash
+uv venv --python 3.11 .venv
+uv pip install -r requirements.txt
 ```
 
 Install CAD Explorer dependencies:
